@@ -40,3 +40,4 @@ test-suite lazy-engine-test
 source-repository head
   type:     git
   location: https://github.com/arotenberg/lazy-engine
+  subdir:   lazy-engine

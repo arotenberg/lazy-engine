@@ -1,0 +1,32 @@
+name:                lazy-engine-jvm
+version:             0.1.0.0
+synopsis:            Backend for lazy-engine targeting the Java Virtual Machine.
+description:         Please see README.md
+homepage:            https://github.com/arotenberg/lazy-engine#readme
+license:             Apache-2.0
+license-file:        LICENSE
+author:              Aaron Rotenberg
+maintainer:          adrotenberg (at) gmail.com
+copyright:           2015 Aaron Rotenberg
+category:            Compiler
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     LazyEngine.JVM.GMachineToJavaClassFile
+                     , LazyEngine.JVM.JavaClassFile
+                     , LazyEngine.JVM.JavaClassFileToBinary
+  build-depends:       base >= 4.7 && < 5
+                     , binary == 0.7.*
+                     , bytestring == 0.10.*
+                     , containers == 0.5.*
+                     , lazy-engine == 0.1.*
+                     , transformers == 0.4.*
+  default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/arotenberg/lazy-engine
+  subdir:   lazy-engine-jvm
