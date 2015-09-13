@@ -11,11 +11,11 @@ import LazyEngine.Name
 import LazyEngine.JVM.JavaClassFile
 
 gMachineClassName, nodeClassName, adtClassName :: String
-gMachineClassName = "com.haskell4j.runtime.GMachine"
-nodeClassName = "com.haskell4j.runtime.Node"
-cellClassName = "com.haskell4j.runtime.Cell"
-adtClassName = "com.haskell4j.runtime.AlgebraicDataType"
-boxedIntClassName = "com.haskell4j.runtime.BoxedInt"
+gMachineClassName = "org.lazyengine.runtime.GMachine"
+nodeClassName = "org.lazyengine.runtime.Node"
+cellClassName = "org.lazyengine.runtime.Cell"
+adtClassName = "org.lazyengine.runtime.AlgebraicDataType"
+boxedIntClassName = "org.lazyengine.runtime.BoxedInt"
 
 gMachineToJavaClassFile :: String -> Module -> [JClass]
 gMachineToJavaClassFile mainClassName (Module dataDecls globals) = mainClass : dataDeclClasses
