@@ -1,6 +1,7 @@
 flags: {}
 packages:
 - 'lazy-engine'
+- 'lazy-engine-experiments'
 - 'lazy-engine-jvm'
 extra-deps: []
 resolver: lts-3.4
