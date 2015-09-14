@@ -29,10 +29,10 @@ testEmpty = operationalToGMachineTest expected input
         expected = G.Module Map.empty Map.empty
 
 testId = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (VarID "id") $
-            O.Supercombinator [Just (VarID "x")] $ TermExpr $ Var (VarID "x")
+  where input = O.Module Map.empty $ Map.singleton (GlobalName "id") $
+            O.Supercombinator [Just (LocalID 1)] $ TermExpr $ Local (LocalID 1)
         expected = G.Module Map.empty $
-            Map.singleton (VarID "id") (G.Supercombinator 1 expectedInstrs)
+            Map.singleton (GlobalName "id") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
             GetArg,
             PopLocal 0,
@@ -43,10 +43,10 @@ testId = operationalToGMachineTest expected input
           ])]
 
 testConst = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (VarID "const") $
-            O.Supercombinator [Just (VarID "x"), Nothing] $ TermExpr $ Var (VarID "x")
+  where input = O.Module Map.empty $ Map.singleton (GlobalName "const") $
+            O.Supercombinator [Just (LocalID 1), Nothing] $ TermExpr $ Local (LocalID 1)
         expected = G.Module Map.empty $
-            Map.singleton (VarID "const") (G.Supercombinator 2 expectedInstrs)
+            Map.singleton (GlobalName "const") (G.Supercombinator 2 expectedInstrs)
         expectedInstrs = [(0, [
             GetArg,
             PopLocal 0,
@@ -59,11 +59,11 @@ testConst = operationalToGMachineTest expected input
           ])]
 
 testFixGlobal = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (VarID "fix") $
-            O.Supercombinator [Just (VarID "f")] $ TermExpr $
-                Var (VarID "f") `Ap` (Var (VarID "fix") `Ap` Var (VarID "f"))
+  where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
+            O.Supercombinator [Just (LocalID 1)] $ TermExpr $
+                Local (LocalID 1) `Ap` (Global (GlobalName "fix") `Ap` Local (LocalID 1))
         expected = G.Module Map.empty $
-            Map.singleton (VarID "fix") (G.Supercombinator 1 expectedInstrs)
+            Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
             GetArg,
             PopLocal 0,
@@ -71,7 +71,7 @@ testFixGlobal = operationalToGMachineTest expected input
             PushLocal 0,
             MakeHole,
             Dup,
-            PushGlobal (VarID "fix"),
+            PushGlobal (GlobalName "fix"),
             PushLocal 0,
             UpdateTo ApCell,
             UpdateTo ApCell,
@@ -84,12 +84,12 @@ testFixGlobal = operationalToGMachineTest expected input
 -- indirection to that. The corresponding situation with a let instead of a letrec should never
 -- happen because the let will be inlined away by earlier stages.
 testFixKnotTying = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (VarID "fix") $
-            O.Supercombinator [Just (VarID "f")] $
-                LetRec (Map.singleton (VarID "x") $ Var (VarID "f") `Ap` Var (VarID "x")) $
-                TermExpr $ Var (VarID "x")
+  where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
+            O.Supercombinator [Just (LocalID 1)] $
+                LetRec (Map.singleton (LocalID 2) $ Local (LocalID 1) `Ap` Local (LocalID 2)) $
+                    TermExpr $ Local (LocalID 2)
         expected = G.Module Map.empty $
-            Map.singleton (VarID "fix") (G.Supercombinator 1 expectedInstrs)
+            Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
             GetArg,
             PopLocal 0,
@@ -106,10 +106,10 @@ testFixKnotTying = operationalToGMachineTest expected input
           ])]
 
 testIntLiteral = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (VarID "foo") $
+  where input = O.Module Map.empty $ Map.singleton (GlobalName "foo") $
             O.Supercombinator [] $ TermExpr $ IntLiteral 3
         expected = G.Module Map.empty $
-            Map.singleton (VarID "foo") (G.Supercombinator 0 expectedInstrs)
+            Map.singleton (GlobalName "foo") (G.Supercombinator 0 expectedInstrs)
         expectedInstrs = [(0, [
             PushRedexRoot,
             MakeBoxedInt 3,

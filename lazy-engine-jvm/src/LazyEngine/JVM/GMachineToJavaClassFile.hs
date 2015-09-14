@@ -23,25 +23,25 @@ gMachineToJavaClassFile mainClassName (Module dataDecls globals) = mainClass : d
         dataDeclClasses = [dataDeclClass mainClassName typeName dataDecl |
             (typeName, dataDecl) <- Map.toList dataDecls]
 
-dataDeclClass :: String -> TyVarID -> DataDecl -> JClass
-dataDeclClass mainClassName (TyVarID typeName) (DataDecl ctors) = JClass {
+dataDeclClass :: String -> TypeName -> DataDecl -> JClass
+dataDeclClass mainClassName (TypeName typeName) (DataDecl ctors) = JClass {
     jClassName = dataClassName,
     jClassSuperclassName = adtClassName,
     jClassPublic = False,
     jClassFinality = JFinal,
-    jClassFields = map sharedNodeField ctors,
+    jClassFields = map sharedCtorField ctors,
     jClassMethods = [dataStaticInitializerMethod dataClassName ctors, dataClassCtor dataClassName]
   }
   where dataClassName = mainClassName ++ "$" ++ typeName
 
-dataStaticInitializerMethod :: String -> [VarID] -> JMethod
+dataStaticInitializerMethod :: String -> [CtorName] -> JMethod
 dataStaticInitializerMethod dataClassName ctors =
     staticInitializerMethod [(JStackMapFrame [] [], compiledInstrs)]
   where compiledInstrs = concat [initCtorInstrs dataClassName ordinal ctor |
             (ordinal, ctor) <- zip [0..] ctors] ++ [JInstr_return]
 
-initCtorInstrs :: String -> Int32 -> VarID -> [JInstr]
-initCtorInstrs dataClassName ordinal (VarID ctorName) = [
+initCtorInstrs :: String -> Int32 -> CtorName -> [JInstr]
+initCtorInstrs dataClassName ordinal (CtorName ctorName) = [
     JInstr_new dataClassName,
     JInstr_dup,
     JInstr_ldc (StringValue ctorName),
@@ -71,7 +71,7 @@ dataClassCtorInstrs dataClassName = [(JStackMapFrame initialLocals [], [
   ])]
   where initialLocals = [VT_object dataClassName, VT_object "java.lang.String", VT_int]
 
-moduleMainClass :: String -> Map.Map VarID Supercombinator -> JClass
+moduleMainClass :: String -> Map.Map GlobalName Supercombinator -> JClass
 moduleMainClass mainClassName globals = JClass {
     jClassName = mainClassName,
     jClassSuperclassName = "java.lang.Object",
@@ -83,8 +83,14 @@ moduleMainClass mainClassName globals = JClass {
             | (name, Supercombinator _ instrs) <- Map.toList globals]
   }
 
-sharedNodeField :: VarID -> JField
-sharedNodeField (VarID name) = JField {
+sharedCtorField :: CtorName -> JField
+sharedCtorField (CtorName name) = sharedField name
+
+sharedNodeField :: GlobalName -> JField
+sharedNodeField (GlobalName name) = sharedField name
+
+sharedField :: String -> JField
+sharedField name = JField {
     jFieldName = "shared$" ++ name,
     jFieldVisibility = JPackagePrivate,
     jFieldStatic = True,
@@ -92,14 +98,14 @@ sharedNodeField (VarID name) = JField {
     jFieldType = JObjectType nodeClassName
   }
 
-moduleStaticInitializerMethod :: String -> Map.Map VarID Supercombinator -> JMethod
+moduleStaticInitializerMethod :: String -> Map.Map GlobalName Supercombinator -> JMethod
 moduleStaticInitializerMethod mainClassName globals =
     staticInitializerMethod [(JStackMapFrame [] [], compiledInstrs)]
   where compiledInstrs = concat [initSupercombinatorInstrs mainClassName name argCount |
             (name, Supercombinator argCount _) <- Map.toList globals] ++ [JInstr_return]
 
-initSupercombinatorInstrs :: String -> VarID -> Int -> [JInstr]
-initSupercombinatorInstrs mainClassName (VarID name) argCount = [
+initSupercombinatorInstrs :: String -> GlobalName -> Int -> [JInstr]
+initSupercombinatorInstrs mainClassName (GlobalName name) argCount = [
     JInstr_ldc $ StringValue name,
     JInstr_ldc $ IntValue (fromIntegral argCount),
     JInstr_ldc $ MethodHandle_invokestatic_Value mainClassName name
@@ -111,8 +117,8 @@ initSupercombinatorInstrs mainClassName (VarID name) argCount = [
     JInstr_putstatic mainClassName ("shared$" ++ name) (JObjectType nodeClassName)
   ]
 
-compileSupercombinator :: String -> VarID -> [(Int, [Instruction])] -> JMethod
-compileSupercombinator mainClassName (VarID name) instrs = JMethod {
+compileSupercombinator :: String -> GlobalName -> [(Int, [Instruction])] -> JMethod
+compileSupercombinator mainClassName (GlobalName name) instrs = JMethod {
     jMethodName = name,
     jMethodVisibility = JPrivate,
     jMethodStatic = True,
@@ -142,9 +148,9 @@ compileInstruction _ GetArg = [
         (JSignature [] (Just $ JObjectType nodeClassName))
   ]
 compileInstruction _ PushRedexRoot = [JInstr_aload 1]
-compileInstruction mainClassName (PushGlobal (VarID name)) =
+compileInstruction mainClassName (PushGlobal (GlobalName name)) =
     [JInstr_getstatic mainClassName ("shared$" ++ name) (JObjectType nodeClassName)]
-compileInstruction mainClassName (PushNoArgsCtor (TyVarID typeName) (VarID ctorName)) =
+compileInstruction mainClassName (PushNoArgsCtor (TypeName typeName) (CtorName ctorName)) =
     [JInstr_getstatic dataClassName ("shared$" ++ ctorName) (JObjectType nodeClassName)]
   where dataClassName = mainClassName ++ "$" ++ typeName
 compileInstruction _ (PushLocal index) = [JInstr_aload (fromIntegral (2 + index))]

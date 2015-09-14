@@ -1,26 +1,34 @@
-module LazyEngine.Operational where
+module LazyEngine.Operational(
+    module LazyEngine.Name,
+    Module(..),
+    DataDecl(..),
+    Supercombinator(..),
+    Expr(..),
+    CasePat(..),
+    Term(..),
+    local,
+    global
+) where
 
 import Data.Int
 import qualified Data.Map as Map
 
 import LazyEngine.Name
 
-data Module = Module (Map.Map TyVarID DataDecl) (Map.Map VarID Supercombinator)
+data Module = Module (Map.Map TypeName DataDecl) (Map.Map GlobalName Supercombinator)
     deriving (Show)
-
-data DataDecl = DataDecl [VarID]
+data DataDecl = DataDecl [CtorName]
     deriving (Show)
-
-data Supercombinator = Supercombinator [Maybe VarID] Expr
+data Supercombinator = Supercombinator [Maybe LocalID] Expr
     deriving (Show)
 
 -- | The body of a supercombinator.
 data Expr
     = TermExpr Term
-    | Let VarID Term Expr
-    | LetRec (Map.Map VarID Term) Expr
-    | LetNoEscape (Map.Map VarID ([VarID], Expr)) Expr
-    | Case Term VarID (Map.Map CasePat Expr) Expr
+    | Let LocalID Term Expr
+    | LetRec (Map.Map LocalID Term) Expr
+    | LetNoEscape (Map.Map LocalID ([LocalID], Expr)) Expr
+    | Case Term LocalID (Map.Map CasePat Expr) Expr
   deriving (Show)
 data CasePat
     = CtorPat Int32
@@ -28,13 +36,17 @@ data CasePat
   deriving (Show, Eq, Ord)
 -- | A "constructible" expression that has a direct representation as cells in-memory.
 data Term
-    = Var VarID
+    = Local LocalID
+    | Global GlobalName
     -- | A saturated data constructor application.
-    | Ctor TyVarID VarID
+    | Ctor TypeName CtorName
     | IntLiteral Int32
     | Term `Ap` Term
   deriving (Show)
 infixl `Ap`
 
-var :: String -> Term
-var = Var . VarID
+local :: Int -> Term
+local = Local . LocalID
+
+global :: String -> Term
+global = Global . GlobalName

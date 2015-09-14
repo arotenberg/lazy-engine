@@ -7,7 +7,7 @@ import qualified System.Process as P
 import LazyEngine.JVM.GMachineToJavaClassFile(gMachineToJavaClassFile)
 import LazyEngine.JVM.JavaClassFile(jClassName)
 import LazyEngine.JVM.JavaClassFileToBinary(fileNameFromClassName, javaClassFileToBinary)
-import LazyEngine.Name(VarID(..))
+import LazyEngine.Name
 import qualified LazyEngine.Operational as O
 import LazyEngine.OperationalToGMachine(operationalToGMachine)
 
@@ -39,12 +39,12 @@ testClassName = "example.ExampleGeneratedModule"
 
 testModule :: O.Module
 testModule = O.Module Map.empty (Map.fromList [
-    (VarID "minusInt", O.Supercombinator [Just (VarID "m"), Just (VarID "n")] $
-        O.TermExpr $ O.var "minusInt" `O.Ap` O.var "m" `O.Ap` O.var "n"),
-    (VarID "main", O.Supercombinator [] $
-        O.TermExpr $ O.var "factorial" `O.Ap` O.IntLiteral 6),
-    (VarID "factorial", O.Supercombinator [Just (VarID "n")] $
-        O.Case (O.var "n") (VarID "m") (Map.fromList [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)])
-            (O.TermExpr $ O.var "timesInt" `O.Ap` O.var "m" `O.Ap` (O.var "factorial" `O.Ap`
-                (O.var "minusInt" `O.Ap` O.var "m" `O.Ap` O.IntLiteral 1))))
+    (GlobalName "minusInt", O.Supercombinator [Just (LocalID 1), Just (LocalID 2)] $
+        O.TermExpr $ O.global "minusInt" `O.Ap` O.local 1 `O.Ap` O.local 2),
+    (GlobalName "main", O.Supercombinator [] $
+        O.TermExpr $ O.global "factorial" `O.Ap` O.IntLiteral 6),
+    (GlobalName "factorial", O.Supercombinator [Just (LocalID 1)] $
+        O.Case (O.local 1) (LocalID 2) (Map.fromList [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)])
+            (O.TermExpr $ O.global "timesInt" `O.Ap` O.local 2 `O.Ap` (O.global "factorial" `O.Ap`
+                (O.global "minusInt" `O.Ap` O.local 2 `O.Ap` O.IntLiteral 1))))
   ])

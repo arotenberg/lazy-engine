@@ -1,7 +1,13 @@
 module LazyEngine.Name where
 
-newtype TyVarID = TyVarID String
+newtype TypeName = TypeName String
     deriving (Show, Eq, Ord)
 
-newtype VarID = VarID String
+newtype CtorName = CtorName String
+    deriving (Show, Eq, Ord)
+
+newtype GlobalName = GlobalName String
+    deriving (Show, Eq, Ord)
+
+newtype LocalID = LocalID Int
     deriving (Show, Eq, Ord)

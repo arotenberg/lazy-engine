@@ -2,17 +2,26 @@
 The 'Eq' instances are only present for the unit tests.
 -}
 
-module LazyEngine.GMachine where
+module LazyEngine.GMachine(
+    module LazyEngine.Name,
+    Module(..),
+    DataDecl(..),
+    Supercombinator(..),
+    Label,
+    Instruction(..),
+    CellContent(..),
+    BinaryOp(..)
+) where
 
 import Data.Int
 import qualified Data.Map as Map
 
 import LazyEngine.Name
 
-data Module = Module (Map.Map TyVarID DataDecl) (Map.Map VarID Supercombinator)
+data Module = Module (Map.Map TypeName DataDecl) (Map.Map GlobalName Supercombinator)
     deriving (Show, Eq)
 
-data DataDecl = DataDecl [VarID]
+data DataDecl = DataDecl [CtorName]
     deriving (Show, Eq)
 
 data Supercombinator = Supercombinator Int [(Int, [Instruction])]
@@ -23,8 +32,8 @@ data Instruction
     = Unwind                 -- ^ s  -->  [empty]  (unwind from redex root)
     | GetArg                 -- ^ s  -->  argValue : s  (argValue is removed from arg stack)
     | PushRedexRoot          -- ^ s  -->  redexRoot : s
-    | PushGlobal VarID       -- ^ s  -->  globalValue : s
-    | PushNoArgsCtor TyVarID VarID  -- ^ s  -->  globalValue : s
+    | PushGlobal GlobalName  -- ^ s  -->  globalValue : s
+    | PushNoArgsCtor TypeName CtorName  -- ^ s  -->  globalValue : s
     | PushLocal Int          -- ^ s  -->  localValue : s
     | Pop                    -- ^ value : s  -->  s  (discard value)
     | PopLocal  Int          -- ^ value : s  -->  s  (set local to point to value)

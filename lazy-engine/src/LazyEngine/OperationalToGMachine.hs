@@ -36,7 +36,7 @@ compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length
         constructGraphInstrs = compileExpr 0 env body
         constructGraphInstrsList = concatMap snd constructGraphInstrs
 
-supercombinatorArgsSetup :: [Maybe VarID] -> (Env, [G.Instruction])
+supercombinatorArgsSetup :: [Maybe LocalID] -> (Env, [G.Instruction])
 supercombinatorArgsSetup args = (env, pushArgsInstrs)
   where namedArgs = catMaybes args
         env = Env (Map.fromList $ zip namedArgs [0..]) Map.empty
@@ -55,7 +55,7 @@ isEval Eval = True
 isEval _ = False
 
 -- Env normalLocals noEscapeLocals
-data Env = Env !(Map.Map VarID Int) !(Map.Map VarID NoEscapeInfo)
+data Env = Env !(Map.Map LocalID Int) !(Map.Map LocalID NoEscapeInfo)
     deriving (Show)
 -- NoEscapeInfo label firstNewLocal
 -- Fields are not strict since we actually use the laziness in compileExpr.
@@ -65,7 +65,7 @@ data NoEscapeInfo = NoEscapeInfo G.Label Int
 localsCount :: Env -> Int
 localsCount (Env normalLocals _) = Map.size normalLocals
 
-addNormalVarToEnv :: VarID -> Env -> (Int, Env)
+addNormalVarToEnv :: LocalID -> Env -> (Int, Env)
 addNormalVarToEnv var env@(Env normalLocals noEscapeLocals) =
     (localIndex, Env normalLocals' noEscapeLocals')
   where localIndex = localsCount env
@@ -73,15 +73,11 @@ addNormalVarToEnv var env@(Env normalLocals noEscapeLocals) =
         -- Make sure we don't end up with a normal and no-escape local with the same name!
         noEscapeLocals' = Map.delete var noEscapeLocals
 
-addNoEscapeVarToEnv :: VarID -> NoEscapeInfo -> Env -> Env
+addNoEscapeVarToEnv :: LocalID -> NoEscapeInfo -> Env -> Env
 addNoEscapeVarToEnv var noEscapeInfo (Env normalLocals noEscapeLocals) =
     Env normalLocals' noEscapeLocals'
   where noEscapeLocals' = Map.insert var noEscapeInfo noEscapeLocals
         normalLocals' = Map.delete var normalLocals
-
-isFree :: VarID -> Env -> Bool
-isFree var (Env normalLocals noEscapeLocals) =
-    Map.notMember var normalLocals && Map.notMember var noEscapeLocals
 
 prependInstrs :: Env -> [G.Instruction] -> [(Int, [G.Instruction])] ->
     [(Int, [G.Instruction])]
@@ -151,16 +147,17 @@ caseJumpInstr caseBranches defaultCaseBranch =
 -- with stack-consuming calls.
 compileTerm :: Env -> Term -> [G.Instruction]
 compileTerm env@(Env _ noEscapeLocals) e = case unrollFuncAp e of
-    Just (f, args)
-        | Just (NoEscapeInfo label firstNewLocal) <- Map.lookup f noEscapeLocals ->
+    (f, reversedArgs)
+        | Local v <- f, Just (NoEscapeInfo label firstNewLocal) <- Map.lookup v noEscapeLocals ->
             -- We assume that the number of arguments given is correct. Note that the argument
             -- graphs are constructed first, then popped out to locals, rather than populating the
             -- locals as the graphs are constructed. This is because some of the parameter locals
             -- may share indices with locals that are currently in scope and interleaving the
             -- construction and popping could corrupt the resulting graphs.
-            concatMap (c env) (reverse args) ++
-                map PopLocal [firstNewLocal..firstNewLocal + length args - 1] ++ [GoTo label]
-        | [lhs, rhs] <- args, isFree f env, Just op <- Map.lookup f binaryOps ->
+            concatMap (c env) reversedArgs ++
+                map PopLocal [firstNewLocal..firstNewLocal + length reversedArgs - 1] ++
+                [GoTo label]
+        | Global g <- f, [rhs, lhs] <- reversedArgs, Just op <- Map.lookup g binaryOps ->
             wrapRootTerm (ee env rhs ++ ee env lhs ++ [BinaryIntOp op, UpdateTo IndirectionCell])
     _ -> wrapRootTerm (c' env e)
 
@@ -170,9 +167,10 @@ wrapRootTerm eCode = [PushRedexRoot] ++ eCode ++ [Unwind]
 -- | @c env e@ is G-code that pushes a graph of @e@ onto the stack.
 c :: Env -> Term -> [G.Instruction]
 c _   (IntLiteral value) = [MakeBoxedInt value]
-c (Env normalLocals _) (Var var)
+c (Env normalLocals _) (Local var)
     | Just i <- var `Map.lookup` normalLocals = [PushLocal i]
-    | otherwise = [PushGlobal var]
+    | otherwise = error $ "Unknown local: " ++ show var
+c _ (Global var) = [PushGlobal var]
 c _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
 c env (f `Ap` x) = [MakeHole, Dup] ++ c env f ++ c env x ++ [UpdateTo ApCell]
 
@@ -185,25 +183,21 @@ c' env e = c env e ++ [UpdateTo IndirectionCell]
 -- | @ee env e@ is G-code that evaluates @e@ to WHNF and pushes the result onto the stack.
 ee :: Env -> Term -> [G.Instruction]
 ee _   (IntLiteral value) = [MakeBoxedInt value]
-ee env (Var opName `Ap` lhs `Ap` rhs)
-    | isFree opName env, Just op <- Map.lookup opName binaryOps =
+ee env (Global opName `Ap` lhs `Ap` rhs)
+    | Just op <- Map.lookup opName binaryOps =
         ee env rhs ++ ee env lhs ++ [BinaryIntOp op]
 ee _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
 ee env e = c env e ++ [Eval]
 
-unrollFuncAp :: Term -> Maybe (VarID, [Term])
-unrollFuncAp t = second reverse `liftM` unrollFuncAp' t
-unrollFuncAp' :: Term -> Maybe (VarID, [Term])
-unrollFuncAp' (Var name) = Just (name, [])
-unrollFuncAp' (Ctor _ _) = Nothing
-unrollFuncAp' (IntLiteral _) = Nothing
-unrollFuncAp' (lhs `Ap` rhs) = second (rhs :) `liftM` unrollFuncAp lhs
+unrollFuncAp :: Term -> (Term, [Term])
+unrollFuncAp (f `Ap` x) = second (x :) (unrollFuncAp f)
+unrollFuncAp t = (t, [])
 
-binaryOps :: Map.Map VarID G.BinaryOp
+binaryOps :: Map.Map GlobalName G.BinaryOp
 binaryOps = Map.fromList [
-    (VarID "plusInt",   G.PlusOp),
-    (VarID "minusInt",  G.MinusOp),
-    (VarID "timesInt",  G.TimesOp),
-    (VarID "quotInt",   G.QuotOp),
-    (VarID "remInt",    G.RemOp)
+    (GlobalName "plusInt",   G.PlusOp),
+    (GlobalName "minusInt",  G.MinusOp),
+    (GlobalName "timesInt",  G.TimesOp),
+    (GlobalName "quotInt",   G.QuotOp),
+    (GlobalName "remInt",    G.RemOp)
   ]
