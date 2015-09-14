@@ -30,7 +30,7 @@ testEmpty = operationalToGMachineTest expected input
 
 testId = operationalToGMachineTest expected input
   where input = O.Module Map.empty $ Map.singleton (GlobalName "id") $
-            O.Supercombinator [Just (LocalID 1)] $ TermExpr $ Local (LocalID 1)
+            O.Supercombinator [LocalID 1] $ TermExpr $ Local (LocalID 1)
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "id") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -44,7 +44,7 @@ testId = operationalToGMachineTest expected input
 
 testConst = operationalToGMachineTest expected input
   where input = O.Module Map.empty $ Map.singleton (GlobalName "const") $
-            O.Supercombinator [Just (LocalID 1), Nothing] $ TermExpr $ Local (LocalID 1)
+            O.Supercombinator [LocalID 1, LocalID 2] $ TermExpr $ Local (LocalID 1)
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "const") (G.Supercombinator 2 expectedInstrs)
         expectedInstrs = [(0, [
@@ -60,7 +60,7 @@ testConst = operationalToGMachineTest expected input
 
 testFixGlobal = operationalToGMachineTest expected input
   where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
-            O.Supercombinator [Just (LocalID 1)] $ TermExpr $
+            O.Supercombinator [LocalID 1] $ TermExpr $
                 Local (LocalID 1) `Ap` (Global (GlobalName "fix") `Ap` Local (LocalID 1))
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
@@ -85,7 +85,7 @@ testFixGlobal = operationalToGMachineTest expected input
 -- happen because the let will be inlined away by earlier stages.
 testFixKnotTying = operationalToGMachineTest expected input
   where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
-            O.Supercombinator [Just (LocalID 1)] $
+            O.Supercombinator [LocalID 1] $
                 LetRec (Map.singleton (LocalID 2) $ Local (LocalID 1) `Ap` Local (LocalID 2)) $
                     TermExpr $ Local (LocalID 2)
         expected = G.Module Map.empty $

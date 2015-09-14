@@ -6,7 +6,7 @@ import Control.Arrow(second)
 import Control.Monad(liftM)
 import Data.List(foldl')
 import qualified Data.Map as Map
-import Data.Maybe(catMaybes)
+import qualified Data.Set as Set
 
 import qualified LazyEngine.GMachine as G
 import LazyEngine.GMachine(Instruction(..), CellContent(..))
@@ -26,7 +26,7 @@ compileSupercombinator :: O.Supercombinator -> G.Supercombinator
 compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length args) bodyInstrs
   where bodyInstrs = prependInstrs (Env Map.empty Map.empty)
             (pushArgsInstrs ++ updateRootToHoleInstrs) constructGraphInstrs
-        (env, pushArgsInstrs) = supercombinatorArgsSetup args
+        (env, pushArgsInstrs) = supercombinatorArgsSetup args (O.freeLocals body)
         -- If the supercombinator body evaluates anything recursively, convert the redex root to a
         -- black hole immediately after popping all the arguments to avoid space leaks and allow
         -- infinite loop detection.
@@ -36,19 +36,28 @@ compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length
         constructGraphInstrs = compileExpr 0 env body
         constructGraphInstrsList = concatMap snd constructGraphInstrs
 
-supercombinatorArgsSetup :: [Maybe LocalID] -> (Env, [G.Instruction])
-supercombinatorArgsSetup args = (env, pushArgsInstrs)
-  where namedArgs = catMaybes args
-        env = Env (Map.fromList $ zip namedArgs [0..]) Map.empty
+supercombinatorArgsSetup :: [LocalID] -> Set.Set LocalID -> (Env, [G.Instruction])
+supercombinatorArgsSetup args bodyFreeLocals = (env, pushArgsInstrs)
+  where argsUsed = argsUsedInBody args bodyFreeLocals
+        usedArgs = [arg | (arg, ArgUsed) <- zip args argsUsed]
+        env = Env (Map.fromList $ zip usedArgs [0..]) Map.empty
         
-        pushArgsInstrs = concatMap (uncurry pushArgInstrs) $ zip argLocals args
+        pushArgsInstrs = concatMap (uncurry pushArgInstrs) $ zip argLocals argsUsed
         
-        argLocals = scanl updateArgNumber 0 args
-        updateArgNumber n Nothing  = n
-        updateArgNumber n (Just _) = n + 1
+        argLocals = scanl updateArgNumber 0 argsUsed
+        updateArgNumber n ArgUnused = n
+        updateArgNumber n ArgUsed   = n + 1
         
-        pushArgInstrs _ Nothing  = [GetArg, Pop]
-        pushArgInstrs n (Just _) = [GetArg, PopLocal n]
+        pushArgInstrs _ ArgUnused = [GetArg, Pop]
+        pushArgInstrs n ArgUsed   = [GetArg, PopLocal n]
+
+data ArgUsage = ArgUnused | ArgUsed
+    deriving (Show)
+
+argsUsedInBody :: [LocalID] -> Set.Set LocalID -> [ArgUsage]
+argsUsedInBody args bodyFreeLocals = fst $ foldr handleArg ([], bodyFreeLocals) args
+  where handleArg arg (usedArgs, freeLocals) = (usage : usedArgs, Set.delete arg freeLocals)
+          where usage = if arg `Set.member` freeLocals then ArgUsed else ArgUnused
 
 isEval :: G.Instruction -> Bool
 isEval Eval = True

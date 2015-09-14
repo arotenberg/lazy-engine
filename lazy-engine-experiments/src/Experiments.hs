@@ -39,11 +39,11 @@ testClassName = "example.ExampleGeneratedModule"
 
 testModule :: O.Module
 testModule = O.Module Map.empty (Map.fromList [
-    (GlobalName "minusInt", O.Supercombinator [Just (LocalID 1), Just (LocalID 2)] $
+    (GlobalName "minusInt", O.Supercombinator [LocalID 1, LocalID 2] $
         O.TermExpr $ O.global "minusInt" `O.Ap` O.local 1 `O.Ap` O.local 2),
     (GlobalName "main", O.Supercombinator [] $
         O.TermExpr $ O.global "factorial" `O.Ap` O.IntLiteral 6),
-    (GlobalName "factorial", O.Supercombinator [Just (LocalID 1)] $
+    (GlobalName "factorial", O.Supercombinator [LocalID 1] $
         O.Case (O.local 1) (LocalID 2) (Map.fromList [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)])
             (O.TermExpr $ O.global "timesInt" `O.Ap` O.local 2 `O.Ap` (O.global "factorial" `O.Ap`
                 (O.global "minusInt" `O.Ap` O.local 2 `O.Ap` O.IntLiteral 1))))
