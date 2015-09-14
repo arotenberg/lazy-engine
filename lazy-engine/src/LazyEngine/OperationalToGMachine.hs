@@ -1,9 +1,10 @@
 module LazyEngine.OperationalToGMachine(
+    ConversionError,
     operationalToGMachine
 ) where
 
 import Control.Arrow(second)
-import Control.Monad(liftM)
+import Control.Monad
 import Data.List(foldl')
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -14,13 +15,43 @@ import LazyEngine.Name
 import qualified LazyEngine.Operational as O
 import LazyEngine.Operational(Expr(..), CasePat(..), Term(..))
 
-operationalToGMachine :: O.Module -> G.Module
-operationalToGMachine (O.Module dataDecls supercombinators) = G.Module gDataDecls gSupercombinators
-  where gDataDecls = Map.map compileDataDecl dataDecls
-        gSupercombinators = Map.map compileSupercombinator supercombinators
+type ConversionError = String
+type Convert = Either ConversionError
+
+conversionError :: ConversionError -> Convert a
+conversionError = Left
+
+operationalToGMachine :: O.Module -> Either ConversionError G.Module
+operationalToGMachine (O.Module dataDecls supercombinators) = do
+    foldM_ checkDataDeclDuplicate Set.empty dataDecls
+    foldM_ checkSupercombinatorDuplicate Set.empty supercombinators
+    let gDataDecls = Map.fromList $ map (second compileDataDecl) dataDecls
+        gSupercombinators = Map.fromList $ map (second compileSupercombinator) supercombinators
+    return $ G.Module gDataDecls gSupercombinators
+
+checkDataDeclDuplicate :: Set.Set TypeName -> (TypeName, O.DataDecl) -> Convert (Set.Set TypeName)
+checkDataDeclDuplicate typeNames (typeName, O.DataDecl ctors)
+    | typeName `Set.member` typeNames =
+        conversionError $ "Duplicate data type: " ++ show typeName
+    | otherwise = do
+        foldM_ checkCtorDuplicate Set.empty ctors
+        return $ Set.insert typeName typeNames
+
+checkCtorDuplicate :: Set.Set CtorName -> CtorName -> Convert (Set.Set CtorName)
+checkCtorDuplicate ctorNames ctorName
+    | ctorName `Set.member` ctorNames =
+        conversionError $ "Duplicate data constructor name: " ++ show ctorName
+    | otherwise = return $ Set.insert ctorName ctorNames
 
 compileDataDecl :: O.DataDecl -> G.DataDecl
 compileDataDecl (O.DataDecl ctors) = G.DataDecl ctors
+
+checkSupercombinatorDuplicate :: Set.Set GlobalName ->
+    (GlobalName, O.Supercombinator) -> Convert (Set.Set GlobalName)
+checkSupercombinatorDuplicate supercombinators (globalName, _)
+    | globalName `Set.member` supercombinators =
+        conversionError $ "Duplicate supercombinator name: " ++ show globalName
+    | otherwise = return $ Set.insert globalName supercombinators
 
 compileSupercombinator :: O.Supercombinator -> G.Supercombinator
 compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length args) bodyInstrs

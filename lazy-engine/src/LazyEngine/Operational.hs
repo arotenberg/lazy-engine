@@ -17,7 +17,7 @@ import qualified Data.Set as Set
 
 import LazyEngine.Name
 
-data Module = Module (Map.Map TypeName DataDecl) (Map.Map GlobalName Supercombinator)
+data Module = Module [(TypeName, DataDecl)] [(GlobalName, Supercombinator)]
     deriving (Show)
 data DataDecl = DataDecl [CtorName]
     deriving (Show)

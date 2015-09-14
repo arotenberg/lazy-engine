@@ -8,7 +8,7 @@ import LazyEngine.GMachine(Instruction(..), CellContent(..))
 import LazyEngine.Name
 import LazyEngine.OperationalToGMachine
 import qualified LazyEngine.Operational as O
-import LazyEngine.Operational(Expr(..), Term(..))
+import LazyEngine.Operational(Expr(..), Term(..), global, local)
 
 tests :: Test
 tests = TestList [
@@ -22,15 +22,15 @@ tests = TestList [
 
 operationalToGMachineTest :: G.Module -> O.Module -> Test
 operationalToGMachineTest expected input =
-    TestCase $ assertEqual "assertion" expected (operationalToGMachine input)
+    TestCase $ assertEqual "assertion" (Right expected) (operationalToGMachine input)
 
 testEmpty = operationalToGMachineTest expected input
-  where input = O.Module Map.empty Map.empty
+  where input = O.Module [] []
         expected = G.Module Map.empty Map.empty
 
 testId = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (GlobalName "id") $
-            O.Supercombinator [LocalID 1] $ TermExpr $ Local (LocalID 1)
+  where input = O.Module [] [(GlobalName "id",
+            O.Supercombinator [LocalID 1] $ TermExpr $ local 1)]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "id") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -43,8 +43,8 @@ testId = operationalToGMachineTest expected input
           ])]
 
 testConst = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (GlobalName "const") $
-            O.Supercombinator [LocalID 1, LocalID 2] $ TermExpr $ Local (LocalID 1)
+  where input = O.Module [] [(GlobalName "const",
+            O.Supercombinator [LocalID 1, LocalID 2] $ TermExpr $ local 1)]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "const") (G.Supercombinator 2 expectedInstrs)
         expectedInstrs = [(0, [
@@ -59,9 +59,8 @@ testConst = operationalToGMachineTest expected input
           ])]
 
 testFixGlobal = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
-            O.Supercombinator [LocalID 1] $ TermExpr $
-                Local (LocalID 1) `Ap` (Global (GlobalName "fix") `Ap` Local (LocalID 1))
+  where input = O.Module [] [(GlobalName "fix",
+            O.Supercombinator [LocalID 1] $ TermExpr $ local 1 `Ap` (global "fix" `Ap` local 1))]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -79,15 +78,14 @@ testFixGlobal = operationalToGMachineTest expected input
           ])]
 
 -- TODO: This test demonstrates a case that could be made slightly more efficient. If the redex
--- root ends up being set to a variable from an immediately-enclosing letrec, we can update the
+-- root ends up being set to a variable from an immediately-enclosing let(rec), we can update the
 -- redex root itself in-place instead of allocating a new cell and setting the redex root to be an
--- indirection to that. The corresponding situation with a let instead of a letrec should never
--- happen because the let will be inlined away by earlier stages.
+-- indirection to that. The client can always optimize let expressions away so that this situation
+-- does not happen, but, as this case demonstrates, this is not always possible for letrecs.
 testFixKnotTying = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (GlobalName "fix") $
+  where input = O.Module [] [(GlobalName "fix", 
             O.Supercombinator [LocalID 1] $
-                LetRec (Map.singleton (LocalID 2) $ Local (LocalID 1) `Ap` Local (LocalID 2)) $
-                    TermExpr $ Local (LocalID 2)
+                LetRec (Map.singleton (LocalID 2) $ local 1 `Ap` local 2) $ TermExpr $ local 2)]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -106,8 +104,7 @@ testFixKnotTying = operationalToGMachineTest expected input
           ])]
 
 testIntLiteral = operationalToGMachineTest expected input
-  where input = O.Module Map.empty $ Map.singleton (GlobalName "foo") $
-            O.Supercombinator [] $ TermExpr $ IntLiteral 3
+  where input = O.Module [] [(GlobalName "foo", O.Supercombinator [] $ TermExpr $ IntLiteral 3)]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "foo") (G.Supercombinator 0 expectedInstrs)
         expectedInstrs = [(0, [

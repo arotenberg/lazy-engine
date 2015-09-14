@@ -13,23 +13,25 @@ import LazyEngine.OperationalToGMachine(operationalToGMachine)
 
 writeOperationalModule :: String -> O.Module -> IO ()
 writeOperationalModule generatedClassName operationalModule =
-    mapM_ (uncurry writeClassFile) classFiles
-  where gModule = operationalToGMachine operationalModule
-        javaClasses = gMachineToJavaClassFile generatedClassName gModule
-        classFiles = [(jClassName javaClass, javaClassFileToBinary javaClass) |
-            javaClass <- javaClasses]
+    case operationalToGMachine operationalModule of
+        Left err -> putStrLn err
+        Right gModule ->
+            let javaClasses = gMachineToJavaClassFile generatedClassName gModule
+                classFiles = [(jClassName javaClass, javaClassFileToBinary javaClass) |
+                    javaClass <- javaClasses]
+            in mapM_ (uncurry writeClassFile) classFiles 
 
 writeClassFile :: String -> B.ByteString -> IO ()
 writeClassFile className classFile = do
+    let classFileName = fileNameFromClassName className
     B.writeFile classFileName classFile
+    let disassemblyFileName = classFileName ++ ".txt"
     withFile disassemblyFileName WriteMode $ \disassemblyFileHandle -> do
         let processArgs = (P.proc "javap"
                 ["-v", "-l", "-p", "-c", "-s", "-constants", className])
                 { P.std_out = P.UseHandle disassemblyFileHandle }
         (_, _, _, javapProcess) <- P.createProcess processArgs
         void $ P.waitForProcess javapProcess
-  where classFileName = fileNameFromClassName className
-        disassemblyFileName = classFileName ++ ".txt"
 
 main :: IO ()
 main = writeOperationalModule testClassName testModule
@@ -38,7 +40,7 @@ testClassName :: String
 testClassName = "example.ExampleGeneratedModule"
 
 testModule :: O.Module
-testModule = O.Module Map.empty (Map.fromList [
+testModule = O.Module [] [
     (GlobalName "minusInt", O.Supercombinator [LocalID 1, LocalID 2] $
         O.TermExpr $ O.global "minusInt" `O.Ap` O.local 1 `O.Ap` O.local 2),
     (GlobalName "main", O.Supercombinator [] $
@@ -47,4 +49,4 @@ testModule = O.Module Map.empty (Map.fromList [
         O.Case (O.local 1) (LocalID 2) (Map.fromList [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)])
             (O.TermExpr $ O.global "timesInt" `O.Ap` O.local 2 `O.Ap` (O.global "factorial" `O.Ap`
                 (O.global "minusInt" `O.Ap` O.local 2 `O.Ap` O.IntLiteral 1))))
-  ])
+  ]
