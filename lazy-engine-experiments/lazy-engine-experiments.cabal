@@ -22,4 +22,5 @@ executable lazy-engine-experiments
                      , lazy-engine == 0.1.*
                      , lazy-engine-jvm == 0.1.*
                      , process == 1.2.*
+  ghc-options:         -W -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
