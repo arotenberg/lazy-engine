@@ -25,12 +25,12 @@ operationalToGMachineTest expected input =
     TestCase $ assertEqual "assertion" (Right expected) (operationalToGMachine input)
 
 testEmpty = operationalToGMachineTest expected input
-  where input = O.Module [] []
+  where input = O.Module []
         expected = G.Module Map.empty Map.empty
 
 testId = operationalToGMachineTest expected input
-  where input = O.Module [] [(GlobalName "id",
-            O.Supercombinator [LocalID 1] $ TermExpr $ local 1)]
+  where input = O.Module [O.GlobalDecl (GlobalName "id")
+            [LocalID 1] $ TermExpr $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "id") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -43,8 +43,8 @@ testId = operationalToGMachineTest expected input
           ])]
 
 testConst = operationalToGMachineTest expected input
-  where input = O.Module [] [(GlobalName "const",
-            O.Supercombinator [LocalID 1, LocalID 2] $ TermExpr $ local 1)]
+  where input = O.Module [O.GlobalDecl (GlobalName "const")
+            [LocalID 1, LocalID 2] $ TermExpr $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "const") (G.Supercombinator 2 expectedInstrs)
         expectedInstrs = [(0, [
@@ -59,8 +59,8 @@ testConst = operationalToGMachineTest expected input
           ])]
 
 testFixGlobal = operationalToGMachineTest expected input
-  where input = O.Module [] [(GlobalName "fix",
-            O.Supercombinator [LocalID 1] $ TermExpr $ local 1 `Ap` (global "fix" `Ap` local 1))]
+  where input = O.Module [O.GlobalDecl (GlobalName "fix")
+            [LocalID 1] $ TermExpr $ local 1 `Ap` (global "fix" `Ap` local 1)]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -83,9 +83,9 @@ testFixGlobal = operationalToGMachineTest expected input
 -- indirection to that. The client can always optimize let expressions away so that this situation
 -- does not happen, but, as this case demonstrates, this is not always possible for letrecs.
 testFixKnotTying = operationalToGMachineTest expected input
-  where input = O.Module [] [(GlobalName "fix", 
-            O.Supercombinator [LocalID 1] $
-                LetRec (Map.singleton (LocalID 2) $ local 1 `Ap` local 2) $ TermExpr $ local 2)]
+  where input = O.Module [O.GlobalDecl (GlobalName "fix")
+            [LocalID 1] $ LetRec (Map.singleton (LocalID 2) $ local 1 `Ap` local 2) $
+                TermExpr $ local 2]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -104,7 +104,7 @@ testFixKnotTying = operationalToGMachineTest expected input
           ])]
 
 testIntLiteral = operationalToGMachineTest expected input
-  where input = O.Module [] [(GlobalName "foo", O.Supercombinator [] $ TermExpr $ IntLiteral 3)]
+  where input = O.Module [O.GlobalDecl (GlobalName "foo") [] $ TermExpr $ IntLiteral 3]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "foo") (G.Supercombinator 0 expectedInstrs)
         expectedInstrs = [(0, [

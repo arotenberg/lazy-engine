@@ -1,30 +1,27 @@
 module LazyEngine.Operational(
     module LazyEngine.Name,
     Module(..),
-    DataDecl(..),
-    Supercombinator(..),
+    Decl(..),
     Expr(..),
     CasePat(..),
     Term(..),
     local,
-    global,
-    ExprPart(..)
+    global
 ) where
 
 import Data.Int
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 
 import LazyEngine.Name
 
-data Module = Module [(TypeName, DataDecl)] [(GlobalName, Supercombinator)]
+data Module = Module [Decl]
     deriving (Show)
-data DataDecl = DataDecl [CtorName]
-    deriving (Show)
-data Supercombinator = Supercombinator [LocalID] Expr
-    deriving (Show)
+data Decl
+    = DataDecl TypeName [CtorName]
+    | GlobalDecl GlobalName [LocalID] Expr
+  deriving (Show)
 
--- | The body of a supercombinator.
+-- | The body of a global variable declaration.
 data Expr
     = TermExpr Term
     | Let LocalID Term Expr
@@ -52,26 +49,3 @@ local = Local . LocalID
 
 global :: String -> Term
 global = Global . GlobalName
-
-class ExprPart e where
-    freeLocals :: e -> Set.Set LocalID
-instance ExprPart Expr where
-    freeLocals (TermExpr e) = freeLocals e
-    freeLocals (Let var e1 e2) = freeLocals e1 `Set.union` Set.delete var (freeLocals e2)
-    freeLocals (LetRec defs e) =
-        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
-      where defsFreeLocals = Set.unions $ map freeLocals $ Map.elems defs
-    freeLocals (LetNoEscape defs e) =
-        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
-      where defsFreeLocals = Set.unions $ map freeDefLocals $ Map.elems defs
-            freeDefLocals (args, defE) = freeLocals defE `Set.difference` Set.fromList args
-    freeLocals (Case scrutinee scrutineeVar cases defaultCase) =
-        freeLocals scrutinee `Set.union` Set.delete scrutineeVar allCasesFreeLocals
-      where allCasesFreeLocals = casesFreeLocals `Set.union` freeLocals defaultCase
-            casesFreeLocals = Set.unions $ map freeLocals $ Map.elems cases
-instance ExprPart Term where
-    freeLocals (Local var) = Set.singleton var
-    freeLocals (Global _) = Set.empty
-    freeLocals (Ctor _ _) = Set.empty
-    freeLocals (IntLiteral _) = Set.empty
-    freeLocals (f `Ap` x) = freeLocals f `Set.union` freeLocals x

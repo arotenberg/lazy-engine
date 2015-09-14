@@ -22,42 +22,47 @@ conversionError :: ConversionError -> Convert a
 conversionError = Left
 
 operationalToGMachine :: O.Module -> Either ConversionError G.Module
-operationalToGMachine (O.Module dataDecls supercombinators) = do
-    foldM_ checkDataDeclDuplicate Set.empty dataDecls
-    foldM_ checkSupercombinatorDuplicate Set.empty supercombinators
-    let gDataDecls = Map.fromList $ map (second compileDataDecl) dataDecls
-        gSupercombinators = Map.fromList $ map (second compileSupercombinator) supercombinators
+operationalToGMachine (O.Module decls) = do
+    foldM_ addDeclToGlobalEnv emptyGlobalEnv decls
+    let gDataDecls = Map.fromList [(typeName, compileDataDecl ctors) |
+            O.DataDecl typeName ctors <- decls]
+        gSupercombinators = Map.fromList [(globalName, compileSupercombinator args body) |
+            O.GlobalDecl globalName args body <- decls]
     return $ G.Module gDataDecls gSupercombinators
 
-checkDataDeclDuplicate :: Set.Set TypeName -> (TypeName, O.DataDecl) -> Convert (Set.Set TypeName)
-checkDataDeclDuplicate typeNames (typeName, O.DataDecl ctors)
-    | typeName `Set.member` typeNames =
+-- | @GlobalEnv dataDecls globalDecls@
+data GlobalEnv = GlobalEnv !(Set.Set TypeName) !(Set.Set GlobalName)
+    deriving (Show)
+
+emptyGlobalEnv :: GlobalEnv
+emptyGlobalEnv = GlobalEnv Set.empty Set.empty
+
+addDeclToGlobalEnv :: GlobalEnv -> O.Decl -> Convert GlobalEnv
+addDeclToGlobalEnv (GlobalEnv dataDecls globalDecls) (O.DataDecl typeName ctors)
+    | typeName `Set.member` dataDecls =
         conversionError $ "Duplicate data type: " ++ show typeName
     | otherwise = do
-        foldM_ checkCtorDuplicate Set.empty ctors
-        return $ Set.insert typeName typeNames
+        foldM_ addCtorToSet Set.empty ctors
+        return $ GlobalEnv (Set.insert typeName dataDecls) globalDecls
+addDeclToGlobalEnv (GlobalEnv dataDecls globalDecls) (O.GlobalDecl globalName _ _)
+    | globalName `Set.member` globalDecls =
+        conversionError $ "Duplicate supercombinator name: " ++ show globalName
+    | otherwise = return $ GlobalEnv dataDecls (Set.insert globalName globalDecls)
 
-checkCtorDuplicate :: Set.Set CtorName -> CtorName -> Convert (Set.Set CtorName)
-checkCtorDuplicate ctorNames ctorName
+addCtorToSet :: Set.Set CtorName -> CtorName -> Convert (Set.Set CtorName)
+addCtorToSet ctorNames ctorName
     | ctorName `Set.member` ctorNames =
         conversionError $ "Duplicate data constructor name: " ++ show ctorName
     | otherwise = return $ Set.insert ctorName ctorNames
 
-compileDataDecl :: O.DataDecl -> G.DataDecl
-compileDataDecl (O.DataDecl ctors) = G.DataDecl ctors
+compileDataDecl :: [CtorName] -> G.DataDecl
+compileDataDecl ctors = G.DataDecl ctors
 
-checkSupercombinatorDuplicate :: Set.Set GlobalName ->
-    (GlobalName, O.Supercombinator) -> Convert (Set.Set GlobalName)
-checkSupercombinatorDuplicate supercombinators (globalName, _)
-    | globalName `Set.member` supercombinators =
-        conversionError $ "Duplicate supercombinator name: " ++ show globalName
-    | otherwise = return $ Set.insert globalName supercombinators
-
-compileSupercombinator :: O.Supercombinator -> G.Supercombinator
-compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length args) bodyInstrs
+compileSupercombinator :: [LocalID] -> O.Expr -> G.Supercombinator
+compileSupercombinator args body = G.Supercombinator (length args) bodyInstrs
   where bodyInstrs = prependInstrs (Env Map.empty Map.empty)
             (pushArgsInstrs ++ updateRootToHoleInstrs) constructGraphInstrs
-        (env, pushArgsInstrs) = supercombinatorArgsSetup args (O.freeLocals body)
+        (env, pushArgsInstrs) = supercombinatorArgsSetup args (freeLocals body)
         -- If the supercombinator body evaluates anything recursively, convert the redex root to a
         -- black hole immediately after popping all the arguments to avoid space leaks and allow
         -- infinite loop detection.
@@ -66,6 +71,10 @@ compileSupercombinator (O.Supercombinator args body) = G.Supercombinator (length
             | otherwise = []
         constructGraphInstrs = compileExpr 0 env body
         constructGraphInstrsList = concatMap snd constructGraphInstrs
+
+isEval :: G.Instruction -> Bool
+isEval Eval = True
+isEval _ = False
 
 supercombinatorArgsSetup :: [LocalID] -> Set.Set LocalID -> (Env, [G.Instruction])
 supercombinatorArgsSetup args bodyFreeLocals = (env, pushArgsInstrs)
@@ -87,18 +96,37 @@ data ArgUsage = ArgUnused | ArgUsed
 
 argsUsedInBody :: [LocalID] -> Set.Set LocalID -> [ArgUsage]
 argsUsedInBody args bodyFreeLocals = fst $ foldr handleArg ([], bodyFreeLocals) args
-  where handleArg arg (usedArgs, freeLocals) = (usage : usedArgs, Set.delete arg freeLocals)
-          where usage = if arg `Set.member` freeLocals then ArgUsed else ArgUnused
+  where handleArg arg (usedArgs, freeLocs) = (usage : usedArgs, Set.delete arg freeLocs)
+          where usage = if arg `Set.member` freeLocs then ArgUsed else ArgUnused
 
-isEval :: G.Instruction -> Bool
-isEval Eval = True
-isEval _ = False
+class ExprPart e where
+    freeLocals :: e -> Set.Set LocalID
+instance ExprPart Expr where
+    freeLocals (TermExpr e) = freeLocals e
+    freeLocals (Let var e1 e2) = freeLocals e1 `Set.union` Set.delete var (freeLocals e2)
+    freeLocals (LetRec defs e) =
+        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
+      where defsFreeLocals = Set.unions $ map freeLocals $ Map.elems defs
+    freeLocals (LetNoEscape defs e) =
+        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
+      where defsFreeLocals = Set.unions $ map freeDefLocals $ Map.elems defs
+            freeDefLocals (args, defE) = freeLocals defE `Set.difference` Set.fromList args
+    freeLocals (Case scrutinee scrutineeVar cases defaultCase) =
+        freeLocals scrutinee `Set.union` Set.delete scrutineeVar allCasesFreeLocals
+      where allCasesFreeLocals = casesFreeLocals `Set.union` freeLocals defaultCase
+            casesFreeLocals = Set.unions $ map freeLocals $ Map.elems cases
+instance ExprPart Term where
+    freeLocals (Local var) = Set.singleton var
+    freeLocals (Global _) = Set.empty
+    freeLocals (Ctor _ _) = Set.empty
+    freeLocals (IntLiteral _) = Set.empty
+    freeLocals (f `Ap` x) = freeLocals f `Set.union` freeLocals x
 
--- Env normalLocals noEscapeLocals
+-- | @Env normalLocals noEscapeLocals@
 data Env = Env !(Map.Map LocalID Int) !(Map.Map LocalID NoEscapeInfo)
     deriving (Show)
--- NoEscapeInfo label firstNewLocal
--- Fields are not strict since we actually use the laziness in compileExpr.
+-- | @NoEscapeInfo label firstNewLocal@
+-- Fields are not strict since we actually use the laziness in 'compileExpr'.
 data NoEscapeInfo = NoEscapeInfo G.Label Int
     deriving (Show)
 
