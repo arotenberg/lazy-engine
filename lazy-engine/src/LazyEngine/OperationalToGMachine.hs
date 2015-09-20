@@ -60,7 +60,9 @@ compileDataDecl ctors = G.DataDecl ctors
 
 compileSupercombinator :: [LocalID] -> O.Expr -> G.Supercombinator
 compileSupercombinator args body = G.Supercombinator (length args) bodyInstrs
-  where bodyInstrs = prependInstrs (Env Map.empty Map.empty)
+  where -- It's safe to just tack entry instructions onto the first block of instructions like this
+        -- because neither case nor let-no-escape can ever jump back to the first block.
+        bodyInstrs = prependInstrs (Env Map.empty Map.empty)
             (pushArgsInstrs ++ updateRootToHoleInstrs) constructGraphInstrs
         (env, pushArgsInstrs) = supercombinatorArgsSetup args (freeLocals body)
         -- If the supercombinator body evaluates anything recursively, convert the redex root to a

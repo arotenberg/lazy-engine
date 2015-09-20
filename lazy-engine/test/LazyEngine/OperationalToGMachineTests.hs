@@ -4,11 +4,11 @@ import qualified Data.Map as Map
 import Test.HUnit
 
 import qualified LazyEngine.GMachine as G
-import LazyEngine.GMachine(Instruction(..), CellContent(..))
+import LazyEngine.GMachine(Instruction(..), CellContent(..), BinaryOp(..))
 import LazyEngine.Name
 import LazyEngine.OperationalToGMachine
 import qualified LazyEngine.Operational as O
-import LazyEngine.Operational(Expr(..), Term(..), global, local)
+import LazyEngine.Operational(Expr(..), CasePat(..), Term(..), global, local)
 
 tests :: Test
 tests = TestList [
@@ -17,7 +17,9 @@ tests = TestList [
     TestLabel "testConst" testConst,
     TestLabel "testFixGlobal" testFixGlobal,
     TestLabel "testFixKnotTying" testFixKnotTying,
-    TestLabel "testIntLiteral" testIntLiteral
+    TestLabel "testIntLiteral" testIntLiteral,
+    TestLabel "testLetNoEscapeLoop" testLetNoEscapeLoop,
+    TestLabel "testLetNoEscapeFactorial" testLetNoEscapeFactorial
   ]
 
 operationalToGMachineTest :: G.Module -> O.Module -> Test
@@ -113,3 +115,79 @@ testIntLiteral = operationalToGMachineTest expected input
             UpdateTo IndirectionCell,
             Unwind
           ])]
+
+testLetNoEscapeLoop = operationalToGMachineTest expected input
+  where input = O.Module [O.GlobalDecl (GlobalName "loop") [] $
+            LetNoEscape (Map.singleton (LocalID 1) ([], TermExpr $ local 1)) $
+                TermExpr $ local 1]
+        expected = G.Module Map.empty $
+            Map.singleton (GlobalName "loop") (G.Supercombinator 0 expectedInstrs)
+        expectedInstrs = [
+            (0, [
+                GoTo 1
+            ]),
+            (0, [
+                GoTo 1
+            ])]
+
+testLetNoEscapeFactorial = operationalToGMachineTest expected input
+  where input = O.Module [O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
+            LetNoEscape (Map.singleton (LocalID 2) ([LocalID 3, LocalID 4],
+                Case (local 4) (LocalID 5) (Map.singleton (IntPat 0) $ TermExpr $ local 3) $
+                    Case (global "timesInt" `Ap` local 3 `Ap` local 5) (LocalID 6) Map.empty $
+                        Case (global "minusInt" `Ap` local 4 `Ap` IntLiteral 1) (LocalID 7) Map.empty $
+                            TermExpr $ local 2 `Ap` local 6 `Ap` local 7)) $
+                TermExpr $ local 2 `Ap` IntLiteral 1 `Ap` local 1]
+        expected = G.Module Map.empty $
+            Map.singleton (GlobalName "factorial") (G.Supercombinator 1 expectedInstrs)
+        expectedInstrs = [
+            (0, [
+                GetArg,
+                PopLocal 0,
+                PushRedexRoot,
+                UpdateTo HoleCell,
+                PushLocal 0,
+                MakeBoxedInt 1,
+                PopLocal 1,
+                PopLocal 2,
+                GoTo 1
+            ]),
+            (3, [
+                PushLocal 2,
+                Eval,
+                Dup,
+                PopLocal 3,
+                IntCaseJump (Map.singleton 0 5) 2
+            ]),
+            (4, [
+                PushLocal 3,
+                Eval,
+                PushLocal 1,
+                Eval,
+                BinaryIntOp TimesOp,
+                Dup,
+                PopLocal 4,
+                GoTo 3
+            ]),
+            (5, [
+                MakeBoxedInt 1,
+                PushLocal 2,
+                Eval,
+                BinaryIntOp MinusOp,
+                Dup,
+                PopLocal 5,
+                GoTo 4
+            ]),
+            (6, [
+                PushLocal 5,
+                PushLocal 4,
+                PopLocal 1,
+                PopLocal 2,
+                GoTo 1
+            ]),
+            (4, [
+                PushRedexRoot,
+                PushLocal 1,
+                UpdateTo IndirectionCell,
+                Unwind
+            ])]
