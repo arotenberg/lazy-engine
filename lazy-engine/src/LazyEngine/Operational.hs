@@ -27,6 +27,7 @@ data Expr
     | Let LocalID Term Expr
     | LetRec [(LocalID, Term)] Expr
     | LetNoEscape [(LocalID, LetNoEscapeBinding)] Expr
+    | CallLNE LocalID [Term]
     | Case Term LocalID [(CasePat, Expr)] Expr
   deriving (Show)
 data LetNoEscapeBinding = LetNoEscapeBinding [LocalID] Expr

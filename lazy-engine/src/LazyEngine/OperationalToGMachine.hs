@@ -133,6 +133,14 @@ compileExpr blockNum env (Case scrutinee scrutineeVar cases defaultCase) =
             in (n + length eCode, bs ++ eCode)
         (_, casesCode) = last casesCodeScan
         caseBranches = Map.fromList $ zip (map fst cases) $ map fst $ tail casesCodeScan
+compileExpr _ env@(Env _ noEscapeLocals) (CallLNE f args) = [(localsCount env, callCode)]
+  where -- Note that the argument graphs are constructed first, then popped out to locals, rather
+        -- than populating the locals as the graphs are constructed. This is because some of the
+        -- parameter locals may share indices with locals that are currently in scope and
+        -- interleaving the construction and popping could corrupt the resulting graphs.
+        callCode = concatMap (c env) (reverse args) ++
+            map PopLocal [firstNewLocal..firstNewLocal + length args - 1] ++ [GoTo label]
+        NoEscapeInfo label firstNewLocal = noEscapeLocals Map.! f
 compileExpr _ env (TermExpr e) = [(localsCount env, compileTerm env e)]
 
 caseJumpInstr :: Map.Map CasePat G.Label -> G.Label -> Instruction
@@ -151,20 +159,10 @@ caseJumpInstr caseBranches defaultCaseBranch =
 -- to a graph of @e@, evaluating @e@ to WHNF unless doing so would cause tail calls to be replaced
 -- with stack-consuming calls.
 compileTerm :: Env -> Term -> [G.Instruction]
-compileTerm env@(Env _ noEscapeLocals) e = case unrollFuncAp e of
-    (f, reversedArgs)
-        | Local v <- f, Just (NoEscapeInfo label firstNewLocal) <- Map.lookup v noEscapeLocals ->
-            -- We assume that the number of arguments given is correct. Note that the argument
-            -- graphs are constructed first, then popped out to locals, rather than populating the
-            -- locals as the graphs are constructed. This is because some of the parameter locals
-            -- may share indices with locals that are currently in scope and interleaving the
-            -- construction and popping could corrupt the resulting graphs.
-            concatMap (c env) reversedArgs ++
-                map PopLocal [firstNewLocal..firstNewLocal + length reversedArgs - 1] ++
-                [GoTo label]
-        | Global g <- f, [rhs, lhs] <- reversedArgs, Just op <- Map.lookup g binaryOps ->
-            wrapRootTerm (ee env rhs ++ ee env lhs ++ [BinaryIntOp op, UpdateTo IndirectionCell])
-    _ -> wrapRootTerm (c' env e)
+compileTerm env (Global opName `Ap` lhs `Ap` rhs)
+    | Just op <- Map.lookup opName binaryOps =
+        wrapRootTerm (ee env rhs ++ ee env lhs ++ [BinaryIntOp op, UpdateTo IndirectionCell])
+compileTerm env e = wrapRootTerm (c' env e)
 
 wrapRootTerm :: [G.Instruction] -> [G.Instruction]
 wrapRootTerm eCode = [PushRedexRoot] ++ eCode ++ [Unwind]

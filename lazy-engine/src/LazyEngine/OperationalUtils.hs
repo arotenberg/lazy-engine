@@ -1,7 +1,6 @@
 module LazyEngine.OperationalUtils(
     ExprPart(..),
-    localVariablesDeclaredIn,
-    unrollFuncAp
+    localVariablesDeclaredIn
 ) where
 
 import Control.Arrow(second)
@@ -24,6 +23,7 @@ instance ExprPart Expr where
             freeDefLocals (LetNoEscapeBinding args defE) =
                 freeLocals defE `Set.difference` Set.fromList args
             boundLocals = Set.fromList (map fst defs)
+    freeLocals (CallLNE f args) = Set.insert f $ Set.unions (map freeLocals args)
     freeLocals (Case scrutinee scrutineeVar cases defaultCase) =
         freeLocals scrutinee `Set.union` Set.delete scrutineeVar allCasesFreeLocals
       where allCasesFreeLocals = casesFreeLocals `Set.union` freeLocals defaultCase
@@ -43,10 +43,7 @@ localVariablesDeclaredIn (LetNoEscape decls e) =
     concatMap declVars decls ++ localVariablesDeclaredIn e
   where declVars (var, LetNoEscapeBinding params body) =
             var : params ++ localVariablesDeclaredIn body
+localVariablesDeclaredIn (CallLNE _ _) = []
 localVariablesDeclaredIn (Case _ scrutineeVar cases defaultCase) =
     scrutineeVar : concatMap caseVars cases ++ localVariablesDeclaredIn defaultCase
   where caseVars (_, body) = localVariablesDeclaredIn body
-
-unrollFuncAp :: Term -> (Term, [Term])
-unrollFuncAp (f `Ap` x) = second (x :) (unrollFuncAp f)
-unrollFuncAp t = (t, [])

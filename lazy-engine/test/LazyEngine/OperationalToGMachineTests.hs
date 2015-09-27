@@ -118,8 +118,8 @@ testIntLiteral = operationalToGMachineTest expected input
 
 testLetNoEscapeLoop = operationalToGMachineTest expected input
   where input = O.Module [O.GlobalDecl (GlobalName "loop") [] $
-            LetNoEscape [(LocalID 1, LetNoEscapeBinding [] $ TermExpr $ local 1)] $
-                TermExpr $ local 1]
+            LetNoEscape [(LocalID 1, LetNoEscapeBinding [] $ CallLNE (LocalID 1) [])] $
+                CallLNE (LocalID 1) []]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "loop") (G.Supercombinator 0 expectedInstrs)
         expectedInstrs = [
@@ -136,8 +136,8 @@ testLetNoEscapeFactorial = operationalToGMachineTest expected input
                 Case (local 4) (LocalID 5) [(IntPat 0, TermExpr $ local 3)] $
                     Case (global "timesInt" `Ap` local 3 `Ap` local 5) (LocalID 6) [] $
                         Case (global "minusInt" `Ap` local 4 `Ap` IntLiteral 1) (LocalID 7) [] $
-                            TermExpr $ local 2 `Ap` local 6 `Ap` local 7)] $
-                TermExpr $ local 2 `Ap` IntLiteral 1 `Ap` local 1]
+                            CallLNE (LocalID 2) [local 6, local 7])] $
+                CallLNE (LocalID 2) [IntLiteral 1, local 1]]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "factorial") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [
