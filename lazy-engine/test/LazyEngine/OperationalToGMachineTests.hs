@@ -8,7 +8,8 @@ import LazyEngine.GMachine(Instruction(..), CellContent(..), BinaryOp(..))
 import LazyEngine.Name
 import LazyEngine.OperationalToGMachine
 import qualified LazyEngine.Operational as O
-import LazyEngine.Operational(Expr(..), CasePat(..), Term(..), global, local)
+import LazyEngine.Operational(
+    Expr(..), LetNoEscapeBinding(..), CasePat(..), Term(..), global, local)
 
 tests :: Test
 tests = TestList [
@@ -86,8 +87,7 @@ testFixGlobal = operationalToGMachineTest expected input
 -- does not happen, but, as this case demonstrates, this is not always possible for letrecs.
 testFixKnotTying = operationalToGMachineTest expected input
   where input = O.Module [O.GlobalDecl (GlobalName "fix")
-            [LocalID 1] $ LetRec (Map.singleton (LocalID 2) $ local 1 `Ap` local 2) $
-                TermExpr $ local 2]
+            [LocalID 1] $ LetRec [(LocalID 2, local 1 `Ap` local 2)] $ TermExpr $ local 2]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -118,7 +118,7 @@ testIntLiteral = operationalToGMachineTest expected input
 
 testLetNoEscapeLoop = operationalToGMachineTest expected input
   where input = O.Module [O.GlobalDecl (GlobalName "loop") [] $
-            LetNoEscape (Map.singleton (LocalID 1) ([], TermExpr $ local 1)) $
+            LetNoEscape [(LocalID 1, LetNoEscapeBinding [] $ TermExpr $ local 1)] $
                 TermExpr $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "loop") (G.Supercombinator 0 expectedInstrs)
@@ -132,11 +132,11 @@ testLetNoEscapeLoop = operationalToGMachineTest expected input
 
 testLetNoEscapeFactorial = operationalToGMachineTest expected input
   where input = O.Module [O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
-            LetNoEscape (Map.singleton (LocalID 2) ([LocalID 3, LocalID 4],
-                Case (local 4) (LocalID 5) (Map.singleton (IntPat 0) $ TermExpr $ local 3) $
-                    Case (global "timesInt" `Ap` local 3 `Ap` local 5) (LocalID 6) Map.empty $
-                        Case (global "minusInt" `Ap` local 4 `Ap` IntLiteral 1) (LocalID 7) Map.empty $
-                            TermExpr $ local 2 `Ap` local 6 `Ap` local 7)) $
+            LetNoEscape [(LocalID 2, LetNoEscapeBinding [LocalID 3, LocalID 4] $
+                Case (local 4) (LocalID 5) [(IntPat 0, TermExpr $ local 3)] $
+                    Case (global "timesInt" `Ap` local 3 `Ap` local 5) (LocalID 6) [] $
+                        Case (global "minusInt" `Ap` local 4 `Ap` IntLiteral 1) (LocalID 7) [] $
+                            TermExpr $ local 2 `Ap` local 6 `Ap` local 7)] $
                 TermExpr $ local 2 `Ap` IntLiteral 1 `Ap` local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "factorial") (G.Supercombinator 1 expectedInstrs)

@@ -3,6 +3,7 @@ module LazyEngine.Operational(
     Module(..),
     Decl(..),
     Expr(..),
+    LetNoEscapeBinding(..),
     CasePat(..),
     Term(..),
     local,
@@ -10,7 +11,6 @@ module LazyEngine.Operational(
 ) where
 
 import Data.Int
-import qualified Data.Map as Map
 
 import LazyEngine.Name
 
@@ -25,10 +25,12 @@ data Decl
 data Expr
     = TermExpr Term
     | Let LocalID Term Expr
-    | LetRec (Map.Map LocalID Term) Expr
-    | LetNoEscape (Map.Map LocalID ([LocalID], Expr)) Expr
-    | Case Term LocalID (Map.Map CasePat Expr) Expr
+    | LetRec [(LocalID, Term)] Expr
+    | LetNoEscape [(LocalID, LetNoEscapeBinding)] Expr
+    | Case Term LocalID [(CasePat, Expr)] Expr
   deriving (Show)
+data LetNoEscapeBinding = LetNoEscapeBinding [LocalID] Expr
+    deriving (Show)
 data CasePat
     = CtorPat Int32
     | IntPat Int32

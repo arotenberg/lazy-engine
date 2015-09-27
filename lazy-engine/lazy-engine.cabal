@@ -19,6 +19,8 @@ library
                      , LazyEngine.Name
                      , LazyEngine.Operational
                      , LazyEngine.OperationalToGMachine
+  other-modules:       LazyEngine.OperationalChecker
+                     , LazyEngine.OperationalUtils
   build-depends:       base >= 4.7 && < 5
                      , containers == 0.5.*
   ghc-options:         -W -threaded -rtsopts -with-rtsopts=-N

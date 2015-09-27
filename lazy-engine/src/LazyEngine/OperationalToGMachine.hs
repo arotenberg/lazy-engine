@@ -3,8 +3,6 @@ module LazyEngine.OperationalToGMachine(
     operationalToGMachine
 ) where
 
-import Control.Arrow(second)
-import Control.Monad
 import Data.List(foldl')
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -13,50 +11,21 @@ import qualified LazyEngine.GMachine as G
 import LazyEngine.GMachine(Instruction(..), CellContent(..))
 import LazyEngine.Name
 import qualified LazyEngine.Operational as O
-import LazyEngine.Operational(Expr(..), CasePat(..), Term(..))
-
-type ConversionError = String
-type Convert = Either ConversionError
-
-conversionError :: ConversionError -> Convert a
-conversionError = Left
+import LazyEngine.Operational(Expr(..), LetNoEscapeBinding(..), CasePat(..), Term(..))
+import LazyEngine.OperationalChecker
+import LazyEngine.OperationalUtils
 
 operationalToGMachine :: O.Module -> Either ConversionError G.Module
-operationalToGMachine (O.Module decls) = do
-    foldM_ addDeclToGlobalEnv emptyGlobalEnv decls
-    let gDataDecls = Map.fromList [(typeName, compileDataDecl ctors) |
+operationalToGMachine m = do
+    checkOperational m
+    return (compileModule m)
+
+compileModule :: O.Module -> G.Module
+compileModule (O.Module decls) = G.Module gDataDecls gSupercombinators
+  where gDataDecls = Map.fromList [(typeName, G.DataDecl ctors) |
             O.DataDecl typeName ctors <- decls]
         gSupercombinators = Map.fromList [(globalName, compileSupercombinator args body) |
             O.GlobalDecl globalName args body <- decls]
-    return $ G.Module gDataDecls gSupercombinators
-
--- | @GlobalEnv dataDecls globalDecls@
-data GlobalEnv = GlobalEnv !(Set.Set TypeName) !(Set.Set GlobalName)
-    deriving (Show)
-
-emptyGlobalEnv :: GlobalEnv
-emptyGlobalEnv = GlobalEnv Set.empty Set.empty
-
-addDeclToGlobalEnv :: GlobalEnv -> O.Decl -> Convert GlobalEnv
-addDeclToGlobalEnv (GlobalEnv dataDecls globalDecls) (O.DataDecl typeName ctors)
-    | typeName `Set.member` dataDecls =
-        conversionError $ "Duplicate data type: " ++ show typeName
-    | otherwise = do
-        foldM_ addCtorToSet Set.empty ctors
-        return $ GlobalEnv (Set.insert typeName dataDecls) globalDecls
-addDeclToGlobalEnv (GlobalEnv dataDecls globalDecls) (O.GlobalDecl globalName _ _)
-    | globalName `Set.member` globalDecls =
-        conversionError $ "Duplicate supercombinator name: " ++ show globalName
-    | otherwise = return $ GlobalEnv dataDecls (Set.insert globalName globalDecls)
-
-addCtorToSet :: Set.Set CtorName -> CtorName -> Convert (Set.Set CtorName)
-addCtorToSet ctorNames ctorName
-    | ctorName `Set.member` ctorNames =
-        conversionError $ "Duplicate data constructor name: " ++ show ctorName
-    | otherwise = return $ Set.insert ctorName ctorNames
-
-compileDataDecl :: [CtorName] -> G.DataDecl
-compileDataDecl ctors = G.DataDecl ctors
 
 compileSupercombinator :: [LocalID] -> O.Expr -> G.Supercombinator
 compileSupercombinator args body = G.Supercombinator (length args) bodyInstrs
@@ -80,49 +49,18 @@ isEval _ = False
 
 supercombinatorArgsSetup :: [LocalID] -> Set.Set LocalID -> (Env, [G.Instruction])
 supercombinatorArgsSetup args bodyFreeLocals = (env, pushArgsInstrs)
-  where argsUsed = argsUsedInBody args bodyFreeLocals
-        usedArgs = [arg | (arg, ArgUsed) <- zip args argsUsed]
+  where argsUsed = map (`Set.member` bodyFreeLocals) args
+        usedArgs = filter (`Set.member` bodyFreeLocals) args
         env = Env (Map.fromList $ zip usedArgs [0..]) Map.empty
         
         pushArgsInstrs = concatMap (uncurry pushArgInstrs) $ zip argLocals argsUsed
         
         argLocals = scanl updateArgNumber 0 argsUsed
-        updateArgNumber n ArgUnused = n
-        updateArgNumber n ArgUsed   = n + 1
+        updateArgNumber n False = n
+        updateArgNumber n True  = n + 1
         
-        pushArgInstrs _ ArgUnused = [GetArg, Pop]
-        pushArgInstrs n ArgUsed   = [GetArg, PopLocal n]
-
-data ArgUsage = ArgUnused | ArgUsed
-    deriving (Show)
-
-argsUsedInBody :: [LocalID] -> Set.Set LocalID -> [ArgUsage]
-argsUsedInBody args bodyFreeLocals = fst $ foldr handleArg ([], bodyFreeLocals) args
-  where handleArg arg (usedArgs, freeLocs) = (usage : usedArgs, Set.delete arg freeLocs)
-          where usage = if arg `Set.member` freeLocs then ArgUsed else ArgUnused
-
-class ExprPart e where
-    freeLocals :: e -> Set.Set LocalID
-instance ExprPart Expr where
-    freeLocals (TermExpr e) = freeLocals e
-    freeLocals (Let var e1 e2) = freeLocals e1 `Set.union` Set.delete var (freeLocals e2)
-    freeLocals (LetRec defs e) =
-        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
-      where defsFreeLocals = Set.unions $ map freeLocals $ Map.elems defs
-    freeLocals (LetNoEscape defs e) =
-        (defsFreeLocals `Set.union` freeLocals e) `Set.difference` Map.keysSet defs
-      where defsFreeLocals = Set.unions $ map freeDefLocals $ Map.elems defs
-            freeDefLocals (args, defE) = freeLocals defE `Set.difference` Set.fromList args
-    freeLocals (Case scrutinee scrutineeVar cases defaultCase) =
-        freeLocals scrutinee `Set.union` Set.delete scrutineeVar allCasesFreeLocals
-      where allCasesFreeLocals = casesFreeLocals `Set.union` freeLocals defaultCase
-            casesFreeLocals = Set.unions $ map freeLocals $ Map.elems cases
-instance ExprPart Term where
-    freeLocals (Local var) = Set.singleton var
-    freeLocals (Global _) = Set.empty
-    freeLocals (Ctor _ _) = Set.empty
-    freeLocals (IntLiteral _) = Set.empty
-    freeLocals (f `Ap` x) = freeLocals f `Set.union` freeLocals x
+        pushArgInstrs _ False = [GetArg, Pop]
+        pushArgInstrs n True  = [GetArg, PopLocal n]
 
 -- | @Env normalLocals noEscapeLocals@
 data Env = Env !(Map.Map LocalID Int) !(Map.Map LocalID NoEscapeInfo)
@@ -137,17 +75,14 @@ localsCount (Env normalLocals _) = Map.size normalLocals
 
 addNormalVarToEnv :: LocalID -> Env -> (Int, Env)
 addNormalVarToEnv var env@(Env normalLocals noEscapeLocals) =
-    (localIndex, Env normalLocals' noEscapeLocals')
+    (localIndex, Env normalLocals' noEscapeLocals)
   where localIndex = localsCount env
         normalLocals' = Map.insert var localIndex normalLocals
-        -- Make sure we don't end up with a normal and no-escape local with the same name!
-        noEscapeLocals' = Map.delete var noEscapeLocals
 
 addNoEscapeVarToEnv :: LocalID -> NoEscapeInfo -> Env -> Env
 addNoEscapeVarToEnv var noEscapeInfo (Env normalLocals noEscapeLocals) =
-    Env normalLocals' noEscapeLocals'
+    Env normalLocals noEscapeLocals'
   where noEscapeLocals' = Map.insert var noEscapeInfo noEscapeLocals
-        normalLocals' = Map.delete var normalLocals
 
 prependInstrs :: Env -> [G.Instruction] -> [(Int, [G.Instruction])] ->
     [(Int, [G.Instruction])]
@@ -161,28 +96,28 @@ compileExpr blockNum env (Let var e1 e2) =
   where (localIndex, env') = addNormalVarToEnv var env
 compileExpr blockNum env@(Env normalLocals noEscapeLocals) (LetRec defs e2) =
     prependInstrs env
-    (concat [[MakeHole, PopLocal i] | i <- [prevLocalsCount..prevLocalsCount + Map.size defs - 1]] ++
-    concat [PushLocal (localIndices Map.! var) : c' env' e1 | (var, e1) <- Map.toList defs])
+    (concat [[MakeHole, PopLocal i] | i <- [prevLocalsCount..prevLocalsCount + length defs - 1]] ++
+    concat [PushLocal (localIndices Map.! var) : c' env' e1 | (var, e1) <- defs])
     (compileExpr blockNum env' e2)
   where prevLocalsCount = localsCount env
-        localIndices = Map.fromList $ zip (Map.keys defs) [prevLocalsCount..]
+        localIndices = Map.fromList $ zip (map fst defs) [prevLocalsCount..]
         normalLocals' = localIndices `Map.union` normalLocals  -- Note left-biased union.
         noEscapeLocals' = noEscapeLocals `Map.difference` localIndices
         env' = Env normalLocals' noEscapeLocals'
 compileExpr blockNum env (LetNoEscape defs e2) = defsCode
   where -- Use laziness to reference the label numbers before they have been computed.
-        env' = foldl' addNoEscapeVar env (Map.keys defs)
+        env' = foldl' addNoEscapeVar env (map fst defs)
         addNoEscapeVar e var =
             addNoEscapeVarToEnv var (NoEscapeInfo (defsBranches Map.! var) firstNewLocal) e
         firstNewLocal = localsCount env
-        allDefs = ([], e2) : Map.elems defs
+        allDefs = LetNoEscapeBinding [] e2 : map snd defs
         defsCodeScan = scanl addDef (blockNum, []) allDefs
-        addDef (n, bs) (params, expr) =
+        addDef (n, bs) (LetNoEscapeBinding params expr) =
             let blockEnv = foldl' (\e param -> snd (addNormalVarToEnv param e)) env' params
                 exprCode = compileExpr n blockEnv expr
             in (n + length exprCode, bs ++ exprCode)
         (_, defsCode) = last defsCodeScan
-        defsBranches = Map.fromList $ zip (Map.keys defs) $ map fst $ tail defsCodeScan
+        defsBranches = Map.fromList $ zip (map fst defs) $ map fst $ tail defsCodeScan
 compileExpr blockNum env (Case scrutinee scrutineeVar cases defaultCase) =
     (localsCount env, caseJumpCode) : casesCode
   where caseJumpCode = ee env scrutinee ++ [Dup, PopLocal localIndex,
@@ -190,14 +125,14 @@ compileExpr blockNum env (Case scrutinee scrutineeVar cases defaultCase) =
         (localIndex, env') = addNormalVarToEnv scrutineeVar env
         -- Put the default case first, since doing so increases the chances that the peephole
         -- optimizations will be able to eliminate an unconditional goto instruction.
-        allCases = defaultCase : Map.elems cases
+        allCases = defaultCase : map snd cases
         defaultCaseBranch = blockNum + 1
         casesCodeScan = scanl addCase (defaultCaseBranch, []) allCases
         addCase (n, bs) e =
             let eCode = compileExpr n env' e
             in (n + length eCode, bs ++ eCode)
         (_, casesCode) = last casesCodeScan
-        caseBranches = Map.fromList $ zip (Map.keys cases) $ map fst $ tail casesCodeScan
+        caseBranches = Map.fromList $ zip (map fst cases) $ map fst $ tail casesCodeScan
 compileExpr _ env (TermExpr e) = [(localsCount env, compileTerm env e)]
 
 caseJumpInstr :: Map.Map CasePat G.Label -> G.Label -> Instruction
@@ -258,10 +193,6 @@ ee env (Global opName `Ap` lhs `Ap` rhs)
         ee env rhs ++ ee env lhs ++ [BinaryIntOp op]
 ee _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
 ee env e = c env e ++ [Eval]
-
-unrollFuncAp :: Term -> (Term, [Term])
-unrollFuncAp (f `Ap` x) = second (x :) (unrollFuncAp f)
-unrollFuncAp t = (t, [])
 
 binaryOps :: Map.Map GlobalName G.BinaryOp
 binaryOps = Map.fromList [

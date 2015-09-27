@@ -46,7 +46,7 @@ testModule = O.Module [
     O.GlobalDecl (GlobalName "main") [] $
         O.TermExpr $ O.global "factorial" `O.Ap` O.IntLiteral 6,
     O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
-        O.Case (O.local 1) (LocalID 2) (Map.fromList [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)])
+        O.Case (O.local 1) (LocalID 2) [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)]
             (O.TermExpr $ O.global "timesInt" `O.Ap` O.local 2 `O.Ap` (O.global "factorial" `O.Ap`
                 (O.global "minusInt" `O.Ap` O.local 2 `O.Ap` O.IntLiteral 1)))
   ]
