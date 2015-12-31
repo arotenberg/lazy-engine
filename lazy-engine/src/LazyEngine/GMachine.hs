@@ -56,5 +56,3 @@ data CellContent
     | IndirectionCell      -- ^ args = [value]
     | ApCell               -- ^ args = [x, f]
   deriving (Show, Eq, Ord)
-data BinaryOp = PlusOp | MinusOp | TimesOp | QuotOp | RemOp
-    deriving (Show, Eq, Ord)

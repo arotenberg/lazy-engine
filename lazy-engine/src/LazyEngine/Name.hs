@@ -11,3 +11,6 @@ newtype GlobalName = GlobalName String
 
 newtype LocalID = LocalID Int
     deriving (Show, Eq, Ord)
+
+data BinaryOp = PlusOp | MinusOp | TimesOp | QuotOp | RemOp
+    deriving (Show, Eq, Ord)
