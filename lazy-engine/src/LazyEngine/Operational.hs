@@ -6,6 +6,7 @@ module LazyEngine.Operational(
     LetNoEscapeBinding(..),
     CasePat(..),
     Term(..),
+    Value(..),
     local,
     global
 ) where
@@ -23,12 +24,13 @@ data Decl
 
 -- | The body of a global variable declaration.
 data Expr
-    = TermExpr Term
+    = Return Value
     | Let LocalID Term Expr
     | LetRec [(LocalID, Term)] Expr
     | LetNoEscape [(LocalID, LetNoEscapeBinding)] Expr
-    | CallLNE LocalID [Term]
-    | Case Term LocalID [(CasePat, Expr)] Expr
+    | CallLNE LocalID [Value]
+    | Case Value LocalID [(CasePat, Expr)] Expr
+    | EvalBinaryOp BinaryOp Value Value LocalID Expr
   deriving (Show)
 data LetNoEscapeBinding = LetNoEscapeBinding [LocalID] Expr
     deriving (Show)
@@ -36,19 +38,26 @@ data CasePat
     = CtorPat Int32
     | IntPat Int32
   deriving (Show, Eq, Ord)
--- | A "constructible" expression that has a direct representation as cells in-memory.
+
+-- | A "constructible" expression that has a direct representation as cells in memory.
 data Term
-    = Local LocalID
-    | Global GlobalName
+    = ValueTerm Value
     -- | A saturated data constructor application.
     | Ctor TypeName CtorName
     | IntLiteral Int32
     | Term `Ap` Term
   deriving (Show)
-infixl `Ap`
+infixl 9 `Ap`
 
-local :: Int -> Term
+-- | An expression whose representation as cells in memory can be constructed without any additional
+-- heap allocation.
+data Value
+    = Local LocalID
+    | Global GlobalName
+  deriving (Show)
+
+local :: Int -> Value
 local = Local . LocalID
 
-global :: String -> Term
+global :: String -> Value
 global = Global . GlobalName

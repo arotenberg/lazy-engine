@@ -4,7 +4,7 @@ import qualified Data.Map as Map
 import Test.HUnit
 
 import qualified LazyEngine.GMachine as G
-import LazyEngine.GMachine(Instruction(..), CellContent(..), BinaryOp(..))
+import LazyEngine.GMachine(Instruction(..), CellContent(..))
 import LazyEngine.Name
 import LazyEngine.OperationalToGMachine
 import qualified LazyEngine.Operational as O
@@ -32,8 +32,8 @@ testEmpty = operationalToGMachineTest expected input
         expected = G.Module Map.empty Map.empty
 
 testId = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "id")
-            [LocalID 1] $ TermExpr $ local 1]
+  where input = O.Module [O.GlobalDecl (GlobalName "id") [LocalID 1] $
+            Return $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "id") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -46,8 +46,8 @@ testId = operationalToGMachineTest expected input
           ])]
 
 testConst = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "const")
-            [LocalID 1, LocalID 2] $ TermExpr $ local 1]
+  where input = O.Module [O.GlobalDecl (GlobalName "const") [LocalID 1, LocalID 2] $
+            Return $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "const") (G.Supercombinator 2 expectedInstrs)
         expectedInstrs = [(0, [
@@ -62,14 +62,17 @@ testConst = operationalToGMachineTest expected input
           ])]
 
 testFixGlobal = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "fix")
-            [LocalID 1] $ TermExpr $ local 1 `Ap` (global "fix" `Ap` local 1)]
+  where input = O.Module [O.GlobalDecl (GlobalName "fix") [LocalID 1] $
+            Let (LocalID 2) (
+                ValueTerm (local 1) `Ap` (ValueTerm (global "fix") `Ap` ValueTerm (local 1))) $
+            Return $ local 2]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
             GetArg,
             PopLocal 0,
-            PushRedexRoot,
+            MakeHole,
+            Dup,
             PushLocal 0,
             MakeHole,
             Dup,
@@ -77,17 +80,21 @@ testFixGlobal = operationalToGMachineTest expected input
             PushLocal 0,
             UpdateTo ApCell,
             UpdateTo ApCell,
+            PopLocal 1,
+            PushRedexRoot,
+            PushLocal 1,
+            UpdateTo IndirectionCell,
             Unwind
           ])]
 
 -- TODO: This test demonstrates a case that could be made slightly more efficient. If the redex
 -- root ends up being set to a variable from an immediately-enclosing let(rec), we can update the
 -- redex root itself in-place instead of allocating a new cell and setting the redex root to be an
--- indirection to that. The client can always optimize let expressions away so that this situation
--- does not happen, but, as this case demonstrates, this is not always possible for letrecs.
+-- indirection to that.
 testFixKnotTying = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "fix")
-            [LocalID 1] $ LetRec [(LocalID 2, local 1 `Ap` local 2)] $ TermExpr $ local 2]
+  where input = O.Module [O.GlobalDecl (GlobalName "fix") [LocalID 1] $
+            LetRec [(LocalID 2, ValueTerm (local 1) `Ap` ValueTerm (local 2))] $
+            Return $ local 2]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "fix") (G.Supercombinator 1 expectedInstrs)
         expectedInstrs = [(0, [
@@ -106,12 +113,16 @@ testFixKnotTying = operationalToGMachineTest expected input
           ])]
 
 testIntLiteral = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "foo") [] $ TermExpr $ IntLiteral 3]
+  where input = O.Module [O.GlobalDecl (GlobalName "foo") [] $
+            Let (LocalID 1) (IntLiteral 3) $
+            Return $ local 1]
         expected = G.Module Map.empty $
             Map.singleton (GlobalName "foo") (G.Supercombinator 0 expectedInstrs)
         expectedInstrs = [(0, [
-            PushRedexRoot,
             MakeBoxedInt 3,
+            PopLocal 0,
+            PushRedexRoot,
+            PushLocal 0,
             UpdateTo IndirectionCell,
             Unwind
           ])]
@@ -131,23 +142,40 @@ testLetNoEscapeLoop = operationalToGMachineTest expected input
             ])]
 
 testLetNoEscapeFactorial = operationalToGMachineTest expected input
-  where input = O.Module [O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
-            LetNoEscape [(LocalID 2, LetNoEscapeBinding [LocalID 3, LocalID 4] $
-                Case (local 4) (LocalID 5) [(IntPat 0, TermExpr $ local 3)] $
-                    Case (global "timesInt" `Ap` local 3 `Ap` local 5) (LocalID 6) [] $
-                        Case (global "minusInt" `Ap` local 4 `Ap` IntLiteral 1) (LocalID 7) [] $
-                            CallLNE (LocalID 2) [local 6, local 7])] $
-                CallLNE (LocalID 2) [IntLiteral 1, local 1]]
-        expected = G.Module Map.empty $
-            Map.singleton (GlobalName "factorial") (G.Supercombinator 1 expectedInstrs)
-        expectedInstrs = [
+  where input = O.Module [
+            O.GlobalDecl (GlobalName "one") [] $
+                Let (LocalID 1) (IntLiteral 1) $
+                Return (local 1),
+            O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
+                LetNoEscape [(LocalID 2, LetNoEscapeBinding [LocalID 3, LocalID 4] $
+                    Case (local 4) (LocalID 5) [(IntPat 0, Return $ local 3)] $
+                        EvalBinaryOp TimesOp (local 3) (local 5) (LocalID 6) $
+                            EvalBinaryOp MinusOp (local 4) (global "one") (LocalID 7) $
+                                CallLNE (LocalID 2) [local 6, local 7])] $
+                    CallLNE (LocalID 2) [global "one", local 1]
+          ]
+        expected = G.Module Map.empty $ Map.fromList [
+            (GlobalName "one", G.Supercombinator 0 expectedOneInstrs),
+            (GlobalName "factorial", G.Supercombinator 1 expectedFactorialInstrs)
+          ]
+        expectedOneInstrs = [
+            (0, [
+                MakeBoxedInt 1,
+                PopLocal 0,
+                PushRedexRoot,
+                PushLocal 0,
+                UpdateTo IndirectionCell,
+                Unwind
+            ])
+          ]
+        expectedFactorialInstrs = [
             (0, [
                 GetArg,
                 PopLocal 0,
                 PushRedexRoot,
                 UpdateTo HoleCell,
                 PushLocal 0,
-                MakeBoxedInt 1,
+                PushGlobal (GlobalName "one"),
                 PopLocal 1,
                 PopLocal 2,
                 GoTo 1
@@ -157,7 +185,7 @@ testLetNoEscapeFactorial = operationalToGMachineTest expected input
                 Eval,
                 Dup,
                 PopLocal 3,
-                IntCaseJump (Map.singleton 0 5) 2
+                IntCaseJump (Map.singleton 0 3) 2
             ]),
             (4, [
                 PushLocal 3,
@@ -165,20 +193,13 @@ testLetNoEscapeFactorial = operationalToGMachineTest expected input
                 PushLocal 1,
                 Eval,
                 BinaryIntOp TimesOp,
-                Dup,
                 PopLocal 4,
-                GoTo 3
-            ]),
-            (5, [
-                MakeBoxedInt 1,
+                PushGlobal (GlobalName "one"),
+                Eval,
                 PushLocal 2,
                 Eval,
                 BinaryIntOp MinusOp,
-                Dup,
                 PopLocal 5,
-                GoTo 4
-            ]),
-            (6, [
                 PushLocal 5,
                 PushLocal 4,
                 PopLocal 1,

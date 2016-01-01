@@ -42,11 +42,23 @@ testClassName = "example.ExampleGeneratedModule"
 testModule :: O.Module
 testModule = O.Module [
     O.GlobalDecl (GlobalName "minusInt") [LocalID 1, LocalID 2] $
-        O.TermExpr $ O.global "minusInt" `O.Ap` O.local 1 `O.Ap` O.local 2,
+        O.EvalBinaryOp MinusOp (O.local 1) (O.local 2) (LocalID 3) $
+        O.Return (O.local 3),
     O.GlobalDecl (GlobalName "main") [] $
-        O.TermExpr $ O.global "factorial" `O.Ap` O.IntLiteral 6,
+        O.Let (LocalID 1) (O.ValueTerm (O.global "factorial") `O.Ap` O.IntLiteral 6) $
+        O.Return (O.local 1),
     O.GlobalDecl (GlobalName "factorial") [LocalID 1] $
-        O.Case (O.local 1) (LocalID 2) [(O.IntPat 0, O.TermExpr $ O.IntLiteral 1)]
-            (O.TermExpr $ O.global "timesInt" `O.Ap` O.local 2 `O.Ap` (O.global "factorial" `O.Ap`
-                (O.global "minusInt" `O.Ap` O.local 2 `O.Ap` O.IntLiteral 1)))
+        O.Case (O.local 1) (LocalID 2)
+          [(O.IntPat 0,
+            O.Let (LocalID 3) (O.IntLiteral 1) $
+            O.Return (O.local 3)
+          )]
+          (
+            O.Let (LocalID 4) (O.ValueTerm (O.global "factorial") `O.Ap`
+                    (O.ValueTerm (O.global "minusInt")
+                        `O.Ap` O.ValueTerm (O.local 2)
+                        `O.Ap` O.IntLiteral 1)) $
+            O.EvalBinaryOp TimesOp (O.local 2) (O.local 4) (LocalID 5) $
+            O.Return (O.local 5)
+          )
   ]

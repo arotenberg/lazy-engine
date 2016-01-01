@@ -11,7 +11,7 @@ import qualified LazyEngine.GMachine as G
 import LazyEngine.GMachine(Instruction(..), CellContent(..))
 import LazyEngine.Name
 import qualified LazyEngine.Operational as O
-import LazyEngine.Operational(Expr(..), LetNoEscapeBinding(..), CasePat(..), Term(..))
+import LazyEngine.Operational(Expr(..), LetNoEscapeBinding(..), CasePat(..), Term(..), Value(..))
 import LazyEngine.OperationalChecker
 import LazyEngine.OperationalUtils
 
@@ -91,6 +91,10 @@ prependInstrs env newCode ((_, firstCode) : rest) =
 prependInstrs _ _ [] = error "Empty list on right-hand side of prependInstrs."
 
 compileExpr :: G.Label -> Env -> Expr -> [(Int, [G.Instruction])]
+compileExpr _ env (Return e) = [(localsCount env, eCode)]
+  where -- TODO: Optimize to construct the new expression on top of the existing redex root when the
+        -- return value is a local variable bound by a let or letrec expression.
+        eCode = wrapRootTerm $ cv env e ++ [UpdateTo IndirectionCell]
 compileExpr blockNum env (Let var e1 e2) =
     prependInstrs env (c env e1 ++ [PopLocal localIndex]) (compileExpr blockNum env' e2)
   where (localIndex, env') = addNormalVarToEnv var env
@@ -118,9 +122,17 @@ compileExpr blockNum env (LetNoEscape defs e2) = defsCode
             in (n + length exprCode, bs ++ exprCode)
         (_, defsCode) = last defsCodeScan
         defsBranches = Map.fromList $ zip (map fst defs) $ map fst $ tail defsCodeScan
+compileExpr _ env@(Env _ noEscapeLocals) (CallLNE f args) = [(localsCount env, callCode)]
+  where -- Note that the argument graphs are constructed first, then popped out to locals, rather
+        -- than populating the locals as the graphs are constructed. This is because some of the
+        -- parameter locals may share indices with locals that are currently in scope and
+        -- interleaving the construction and popping could corrupt the resulting graphs.
+        callCode = concatMap (cv env) (reverse args) ++
+            map PopLocal [firstNewLocal..firstNewLocal + length args - 1] ++ [GoTo label]
+        NoEscapeInfo label firstNewLocal = noEscapeLocals Map.! f
 compileExpr blockNum env (Case scrutinee scrutineeVar cases defaultCase) =
     (localsCount env, caseJumpCode) : casesCode
-  where caseJumpCode = ee env scrutinee ++ [Dup, PopLocal localIndex,
+  where caseJumpCode = ev env scrutinee ++ [Dup, PopLocal localIndex,
             caseJumpInstr caseBranches defaultCaseBranch]
         (localIndex, env') = addNormalVarToEnv scrutineeVar env
         -- Put the default case first, since doing so increases the chances that the peephole
@@ -133,15 +145,10 @@ compileExpr blockNum env (Case scrutinee scrutineeVar cases defaultCase) =
             in (n + length eCode, bs ++ eCode)
         (_, casesCode) = last casesCodeScan
         caseBranches = Map.fromList $ zip (map fst cases) $ map fst $ tail casesCodeScan
-compileExpr _ env@(Env _ noEscapeLocals) (CallLNE f args) = [(localsCount env, callCode)]
-  where -- Note that the argument graphs are constructed first, then popped out to locals, rather
-        -- than populating the locals as the graphs are constructed. This is because some of the
-        -- parameter locals may share indices with locals that are currently in scope and
-        -- interleaving the construction and popping could corrupt the resulting graphs.
-        callCode = concatMap (c env) (reverse args) ++
-            map PopLocal [firstNewLocal..firstNewLocal + length args - 1] ++ [GoTo label]
-        NoEscapeInfo label firstNewLocal = noEscapeLocals Map.! f
-compileExpr _ env (TermExpr e) = [(localsCount env, compileTerm env e)]
+compileExpr blockNum env (EvalBinaryOp op lhs rhs var e) =
+    prependInstrs env (ev env rhs ++ ev env lhs ++ [BinaryIntOp op, PopLocal localIndex]) $
+        compileExpr blockNum env' e
+  where (localIndex, env') = addNormalVarToEnv var env
 
 caseJumpInstr :: Map.Map CasePat G.Label -> G.Label -> Instruction
 caseJumpInstr caseBranches defaultCaseBranch =
@@ -155,25 +162,13 @@ caseJumpInstr caseBranches defaultCaseBranch =
                 let intBranches = Map.mapKeys (\(IntPat n) -> n) caseBranches
                 in IntCaseJump intBranches defaultCaseBranch
 
--- | @compileTerm env e destCode@ is G-code that updates the destination node on top of the stack
--- to a graph of @e@, evaluating @e@ to WHNF unless doing so would cause tail calls to be replaced
--- with stack-consuming calls.
-compileTerm :: Env -> Term -> [G.Instruction]
-compileTerm env (Global opName `Ap` lhs `Ap` rhs)
-    | Just op <- Map.lookup opName binaryOps =
-        wrapRootTerm (ee env rhs ++ ee env lhs ++ [BinaryIntOp op, UpdateTo IndirectionCell])
-compileTerm env e = wrapRootTerm (c' env e)
-
 wrapRootTerm :: [G.Instruction] -> [G.Instruction]
 wrapRootTerm eCode = [PushRedexRoot] ++ eCode ++ [Unwind]
 
--- | @c env e@ is G-code that pushes a graph of @e@ onto the stack.
+-- | @c env e@ is G-code that pushes a graph of @e@ onto the stack, where @e@ is a 'Term'.
 c :: Env -> Term -> [G.Instruction]
+c env (ValueTerm value) = cv env value
 c _   (IntLiteral value) = [MakeBoxedInt value]
-c (Env normalLocals _) (Local var)
-    | Just i <- var `Map.lookup` normalLocals = [PushLocal i]
-    | otherwise = error $ "Unknown local: " ++ show var
-c _ (Global var) = [PushGlobal var]
 c _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
 c env (f `Ap` x) = [MakeHole, Dup] ++ c env f ++ c env x ++ [UpdateTo ApCell]
 
@@ -183,20 +178,13 @@ c' :: Env -> Term -> [G.Instruction]
 c' env (f `Ap` x) = c env f ++ c env x ++ [UpdateTo ApCell]
 c' env e = c env e ++ [UpdateTo IndirectionCell]
 
--- | @ee env e@ is G-code that evaluates @e@ to WHNF and pushes the result onto the stack.
-ee :: Env -> Term -> [G.Instruction]
-ee _   (IntLiteral value) = [MakeBoxedInt value]
-ee env (Global opName `Ap` lhs `Ap` rhs)
-    | Just op <- Map.lookup opName binaryOps =
-        ee env rhs ++ ee env lhs ++ [BinaryIntOp op]
-ee _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
-ee env e = c env e ++ [Eval]
+-- | @cv env e@ is G-code that pushes a graph of @e@ onto the stack, where @e@ is a 'Value'.
+cv :: Env -> Value -> [G.Instruction]
+cv (Env normalLocals _) (Local var) = [PushLocal i]
+  where i = normalLocals Map.! var
+cv _ (Global var) = [PushGlobal var]
 
-binaryOps :: Map.Map GlobalName G.BinaryOp
-binaryOps = Map.fromList [
-    (GlobalName "plusInt",   G.PlusOp),
-    (GlobalName "minusInt",  G.MinusOp),
-    (GlobalName "timesInt",  G.TimesOp),
-    (GlobalName "quotInt",   G.QuotOp),
-    (GlobalName "remInt",    G.RemOp)
-  ]
+-- | @ev env e@ is G-code that evaluates @e@ to WHNF and pushes the result onto the stack, where @e@
+-- is a 'Value'.
+ev :: Env -> Value -> [G.Instruction]
+ev env e = cv env e ++ [Eval]

@@ -9,8 +9,7 @@ module LazyEngine.GMachine(
     Supercombinator(..),
     Label,
     Instruction(..),
-    CellContent(..),
-    BinaryOp(..)
+    CellContent(..)
 ) where
 
 import Data.Int
