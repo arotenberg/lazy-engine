@@ -1,6 +1,5 @@
 import Control.Monad
 import qualified Data.ByteString.Lazy as B
-import qualified Data.Map as Map
 import System.IO(withFile, IOMode(..))
 import qualified System.Process as P
 

@@ -6,7 +6,6 @@ import Data.Int(Int32)
 import qualified Data.Map as Map
 
 import LazyEngine.GMachine
-import LazyEngine.Name
 
 import LazyEngine.JVM.JavaClassFile
 

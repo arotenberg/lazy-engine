@@ -18,7 +18,7 @@ import LazyEngine.Name
 data Module = Module [Decl]
     deriving (Show)
 data Decl
-    = DataDecl TypeName [CtorName]
+    = DataDecl TypeName [CtorDecl]
     | GlobalDecl GlobalName [LocalID] Expr
   deriving (Show)
 
@@ -35,7 +35,7 @@ data Expr
 data LetNoEscapeBinding = LetNoEscapeBinding [LocalID] Expr
     deriving (Show)
 data CasePat
-    = CtorPat Int32
+    = CtorPat TypeName CtorName [LocalID]
     | IntPat Int32
   deriving (Show, Eq, Ord)
 
@@ -43,7 +43,7 @@ data CasePat
 data Term
     = ValueTerm Value
     -- | A saturated data constructor application.
-    | Ctor TypeName CtorName
+    | Ctor TypeName CtorName [Term]
     | IntLiteral Int32
     | Term `Ap` Term
   deriving (Show)

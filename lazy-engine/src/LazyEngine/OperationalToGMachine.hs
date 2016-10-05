@@ -169,7 +169,8 @@ wrapRootTerm eCode = [PushRedexRoot] ++ eCode ++ [Unwind]
 c :: Env -> Term -> [G.Instruction]
 c env (ValueTerm value) = cv env value
 c _   (IntLiteral value) = [MakeBoxedInt value]
-c _   (Ctor typeName ctorName) = [PushNoArgsCtor typeName ctorName]
+c env (Ctor typeName ctorName args) =
+    concatMap (c env) args ++ [MakeCtor typeName ctorName (length args)]
 c env (f `Ap` x) = [MakeHole, Dup] ++ c env f ++ c env x ++ [UpdateTo ApCell]
 
 -- | @c' env e destCode@ is G-code that updates the destination node on top of the stack to a

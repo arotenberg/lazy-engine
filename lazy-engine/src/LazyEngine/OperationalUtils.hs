@@ -31,7 +31,7 @@ instance ExprPart Expr where
         freeLocals arg1 `Set.union` freeLocals arg2 `Set.union` Set.insert var (freeLocals e)
 instance ExprPart Term where
     freeLocals (ValueTerm value) = freeLocals value
-    freeLocals (Ctor _ _) = Set.empty
+    freeLocals (Ctor _ _ args) = Set.unions (map freeLocals args)
     freeLocals (IntLiteral _) = Set.empty
     freeLocals (f `Ap` x) = freeLocals f `Set.union` freeLocals x
 instance ExprPart Value where
